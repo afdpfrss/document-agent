@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { auth, signOut } from "@/auth";
 import { isAuthEnabled } from "@/lib/auth-helpers";
+import { SiteNav } from "./SiteNav";
 
 export async function SiteHeader() {
   // Auth off → no session lookup (would just return null anyway), no
@@ -16,7 +17,7 @@ export async function SiteHeader() {
           <Link href="/" className="font-bold text-slate-800 text-sm sm:text-base">
             社内ドキュメントエージェント
           </Link>
-          <Nav />
+          <SiteNav />
         </div>
         <span
           className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-amber-100 text-amber-800"
@@ -35,7 +36,7 @@ export async function SiteHeader() {
         <Link href="/" className="font-bold text-slate-800 text-sm sm:text-base">
           社内ドキュメントエージェント
         </Link>
-        <Nav />
+        <SiteNav />
       </div>
       {session?.user ? (
         <div className="flex items-center gap-3 text-xs sm:text-sm">
@@ -71,21 +72,3 @@ export async function SiteHeader() {
   );
 }
 
-function Nav() {
-  return (
-    <nav className="flex items-center gap-2 sm:gap-3 text-[11px] sm:text-xs text-slate-600 whitespace-nowrap">
-      <Link href="/" className="hover:text-indigo-700">
-        チャット
-      </Link>
-      <Link href="/documents" className="hover:text-indigo-700">
-        文書一覧
-      </Link>
-      <Link href="/upload" className="hover:text-indigo-700">
-        アップロード
-      </Link>
-      <Link href="/pr" className="hover:text-indigo-700">
-        文書履歴
-      </Link>
-    </nav>
-  );
-}
