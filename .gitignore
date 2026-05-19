@@ -36,6 +36,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Per-corpus vector index — regenerable from documents/ via
+# scripts/generate-embeddings.mjs, too large to be useful in version control.
+/documents/embeddings.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

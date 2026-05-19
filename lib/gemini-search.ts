@@ -6,6 +6,7 @@ import {
   type DocumentMeta,
 } from "./document-utils";
 import { llmConfig, requireApiKey } from "./llm-config";
+import { renderVectorBlock, vectorSearch } from "./hybrid-search";
 
 export interface SearchSource {
   doc_id: string;
@@ -134,10 +135,26 @@ async function step1FindCandidates(
     },
   });
 
-  const indexSnippet = buildIndexSnippet(index);
+  // Hybrid search: vector top-k runs in parallel with the (synchronous, cached)
+  // index snippet build. Vector path is best-effort — a null result just means
+  // the prompt falls back to the metadata-only shape that Phases 1-2 used.
+  const [vectorHits, indexSnippet] = await Promise.all([
+    vectorSearch(question, 10).catch((e) => {
+      console.warn("[search] vectorSearch threw, falling back:", e instanceof Error ? e.message : e);
+      return null;
+    }),
+    Promise.resolve(buildIndexSnippet(index)),
+  ]);
+  if (vectorHits) {
+    console.log(
+      `[search.hybrid] vector_hits=${vectorHits.length} top_score=${vectorHits[0]?.score.toFixed(3) ?? "n/a"}`,
+    );
+  }
+  const vectorBlock = vectorHits ? renderVectorBlock(vectorHits) : "";
+
   const prompt = `あなたは社内ドキュメント検索のアシスタントです。下記のドキュメント一覧（フロントマター+サマリー）から、ユーザーの質問に答えるために本文を読むべきドキュメントとセクションを最大3件まで選んでください。あわせて、ユーザーの質問の言語を検出してください。
 
-# ドキュメント一覧
+${vectorBlock}# ドキュメント一覧
 ${indexSnippet}
 
 # ユーザーの質問
