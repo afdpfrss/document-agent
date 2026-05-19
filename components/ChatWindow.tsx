@@ -66,9 +66,42 @@ export function ChatWindow() {
   );
 
   useEffect(() => {
-    setHeading(pickRandom(CHAT_HEADINGS));
-    setSubtitle(pickRandom(CHAT_SUBTITLES));
-    setQuestions(sampleN(SAMPLE_QUESTIONS, DISPLAY_QUESTION_COUNT));
+    // 連続表示で同じ内容が出ないよう、前回値を localStorage で覚えて除外する。
+    const HEADING_KEY = "chat:last-heading";
+    const SUBTITLE_KEY = "chat:last-subtitle";
+    const QUESTIONS_KEY = "chat:last-questions";
+
+    const lastHeading = localStorage.getItem(HEADING_KEY);
+    const lastSubtitle = localStorage.getItem(SUBTITLE_KEY);
+    let lastQuestions: string[] = [];
+    try {
+      const raw = localStorage.getItem(QUESTIONS_KEY);
+      if (raw) lastQuestions = JSON.parse(raw);
+    } catch {
+      lastQuestions = [];
+    }
+
+    const headingPool = CHAT_HEADINGS.filter((h) => h !== lastHeading);
+    const subtitlePool = CHAT_SUBTITLES.filter((s) => s !== lastSubtitle);
+    // 質問は前回表示した5件を除いた中から5件抽出。残数が足りなければ全体から補完。
+    const questionPool = SAMPLE_QUESTIONS.filter(
+      (q) => !lastQuestions.includes(q),
+    );
+    const nextQuestions =
+      questionPool.length >= DISPLAY_QUESTION_COUNT
+        ? sampleN(questionPool, DISPLAY_QUESTION_COUNT)
+        : sampleN(SAMPLE_QUESTIONS, DISPLAY_QUESTION_COUNT);
+
+    const nextHeading = pickRandom(headingPool);
+    const nextSubtitle = pickRandom(subtitlePool);
+
+    setHeading(nextHeading);
+    setSubtitle(nextSubtitle);
+    setQuestions(nextQuestions);
+
+    localStorage.setItem(HEADING_KEY, nextHeading);
+    localStorage.setItem(SUBTITLE_KEY, nextSubtitle);
+    localStorage.setItem(QUESTIONS_KEY, JSON.stringify(nextQuestions));
   }, []);
 
   useEffect(() => {
