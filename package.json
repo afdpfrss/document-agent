@@ -6,12 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "ingest": "node scripts/ingest.mjs"
+    "ingest": "node scripts/ingest.mjs",
+    "propose-edit": "node scripts/propose-edit.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "gray-matter": "^4.0.3",
     "next": "16.2.6",
+    "octokit": "^5.0.5",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",

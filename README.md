@@ -105,6 +105,28 @@ node scripts/generate-embeddings.mjs
 
 `embeddings.json` は `.gitignore` 済み。ファイルが無い／クエリ埋め込み呼び出しが失敗した／次元が一致しない場合、ハイブリッド層は無効化されメタデータ単独の Phase 1-2 挙動に自動フォールバックする（ユーザーに見える失敗は出さない）。pgvector 等への移行は 500 件規模を超えてから（設計 §6, §10）。
 
+## GitHub バックエンド: 編集提案フロー（v2 設計 Phase 5）
+
+全てのドキュメント編集を「branch を切る → 変更を commit → PR を立てる」のフローに通すことで、`.github/CODEOWNERS` で振り分けたレビュアーがマージ前に承認できる構造になっている（設計 §4-E）。
+
+```bash
+# 編集後のフル本文を <new.md> に用意して PR を作る
+npm run propose-edit -- doc_001 ./new.md --message "就業規則の文言修正"
+# → Branch: edit/doc_001-1700000000
+# → PR #42: https://github.com/afdpfrss/document-agent/pull/42
+```
+
+必要な環境変数:
+
+| 変数 | 既定値 | 用途 |
+|---|---|---|
+| `GITHUB_TOKEN` | （必須） | `repo` スコープの PAT または GitHub App のインストールトークン |
+| `GITHUB_REPO_OWNER` | `afdpfrss` | 対象 owner |
+| `GITHUB_REPO_NAME` | `document-agent` | 対象 repo |
+| `GITHUB_BASE_BRANCH` | `main` | PR のターゲット |
+
+`.github/CODEOWNERS` は社内チームのプレースホルダー入りでコミット済み。本番運用時は実在のチームに置き換え、GitHub のブランチ保護で "Require review from Code Owners" を有効化する。`lib/github.ts` の `proposeEdit()` は Phase 6（チャット編集 UI）の `{find, replace, reason}` 提案からも同じ経路で呼ばれる予定。
+
 ## デプロイ
 
 Vercel: `vercel` コマンドで即デプロイ可。`GEMINI_API_KEY` を環境変数に登録すること。Next.js 16 + Node ランタイム（Fluid Compute）で動作。
