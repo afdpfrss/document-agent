@@ -61,6 +61,7 @@ interface PreviewItem {
   finalMarkdown: string;
   indexEntry: IndexEntry;
   metaSource: "llm" | "fallback";
+  metaError?: string;
 }
 
 interface PreviewResponse {
@@ -211,6 +212,22 @@ export function UploadPanel() {
 
   const active = useMemo(() => previews.find((p) => p.tempId === activeTab) ?? null, [previews, activeTab]);
 
+  // Surface the first distinct LLM error across all previews — if 10 files
+  // all hit the same quota, the user should see it once at the top, not
+  // have to open every tab to find out.
+  const llmNotice = useMemo(() => {
+    const errs = previews
+      .map((p) => p.metaError)
+      .filter((m): m is string => !!m);
+    if (errs.length === 0) return null;
+    const unique = [...new Set(errs)];
+    return {
+      message: unique[0],
+      affected: previews.filter((p) => p.metaError).length,
+      total: previews.length,
+    };
+  }, [previews]);
+
   return (
     <div className="h-full flex flex-col">
       <header className="border-b border-slate-200 bg-white px-6 py-3 flex items-center justify-between">
@@ -237,6 +254,20 @@ export function UploadPanel() {
       {error && (
         <div className="bg-red-50 border-b border-red-200 px-6 py-3 text-sm text-red-800">
           {error}
+        </div>
+      )}
+      {llmNotice && (
+        <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 text-sm text-amber-900">
+          <div className="font-semibold mb-1">
+            AIによる自動メタデータが使えませんでした
+            {llmNotice.affected < llmNotice.total
+              ? `（${llmNotice.affected} / ${llmNotice.total} 件）`
+              : ""}
+          </div>
+          <p className="text-xs leading-relaxed">{llmNotice.message}</p>
+          <p className="text-xs text-amber-800 mt-1">
+            該当ファイルはタイトル・カテゴリ・要約を手動で入力してから提出してください。
+          </p>
         </div>
       )}
       {warnings.length > 0 && (
@@ -374,8 +405,15 @@ function PreviewEditor({
     <div className="flex-1 min-h-0 grid grid-cols-[320px_1fr] gap-4 mt-3">
       <aside className="overflow-y-auto space-y-3 text-sm">
         {item.metaSource === "fallback" && (
-          <div className="rounded-md bg-amber-50 border border-amber-200 text-amber-900 text-xs px-3 py-2">
-            LLM 生成に失敗 / 未設定のためフォールバック値です。タイトル・カテゴリ・要約を確認してください。
+          <div className="rounded-md bg-amber-50 border border-amber-200 text-amber-900 text-xs px-3 py-2 space-y-1">
+            <div className="font-semibold">AIによる自動メタデータが使えませんでした</div>
+            <p className="leading-relaxed">
+              {item.metaError ??
+                "LLM が未設定のため、ファイル名から仮の値を入れています。"}
+            </p>
+            <p className="text-amber-800">
+              タイトル・カテゴリ・要約を手動で入力してください。
+            </p>
           </div>
         )}
         <Field label="ID">

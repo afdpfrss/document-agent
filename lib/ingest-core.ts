@@ -14,6 +14,7 @@
 // we only pay for the formats actually used in a given invocation.
 
 import { llmConfig } from "./llm-config";
+import { friendlyLlmError } from "./llm-errors";
 import type { DocumentMeta } from "./document-utils";
 
 // ---------- format converters ----------
@@ -413,6 +414,10 @@ export interface IngestPreview {
   finalMarkdown: string;
   indexEntry: DocumentMeta;
   metaSource: "llm" | "fallback";
+  // Friendly explanation when LLM frontmatter fell back. Quota errors get
+  // a chat-style message; key/other errors get a short generic notice.
+  // Omitted when meta came from LLM successfully or LLM was disabled.
+  metaError?: string;
 }
 
 export interface BuildPreviewOptions {
@@ -437,6 +442,7 @@ export async function buildPreview(opts: BuildPreviewOptions): Promise<IngestPre
 
   let meta: FrontmatterMeta;
   let metaSource: "llm" | "fallback" = "llm";
+  let metaError: string | undefined;
   if (opts.useLlm === false || !llmConfig.apiKey) {
     meta = {
       title: hintTitle,
@@ -445,6 +451,9 @@ export async function buildPreview(opts: BuildPreviewOptions): Promise<IngestPre
       summary: "",
     };
     metaSource = "fallback";
+    if (opts.useLlm !== false && !llmConfig.apiKey) {
+      metaError = "サーバーの設定が完了していません。管理者にお問い合わせください。";
+    }
   } else {
     try {
       meta = await generateFrontmatterWithLlm({
@@ -453,7 +462,7 @@ export async function buildPreview(opts: BuildPreviewOptions): Promise<IngestPre
         hintTitle,
       });
       if (opts.forceCategory) meta.category = opts.forceCategory;
-    } catch {
+    } catch (e) {
       meta = {
         title: hintTitle,
         category: opts.forceCategory ?? "その他業務ガイド",
@@ -461,6 +470,11 @@ export async function buildPreview(opts: BuildPreviewOptions): Promise<IngestPre
         summary: "",
       };
       metaSource = "fallback";
+      const raw = e instanceof Error ? e.message : String(e);
+      metaError = friendlyLlmError(
+        raw,
+        "AIによるメタデータ生成に失敗しました。タイトル・カテゴリ・要約を手動で入力してください。",
+      );
     }
   }
 
@@ -503,5 +517,6 @@ export async function buildPreview(opts: BuildPreviewOptions): Promise<IngestPre
     finalMarkdown,
     indexEntry,
     metaSource,
+    metaError,
   };
 }
