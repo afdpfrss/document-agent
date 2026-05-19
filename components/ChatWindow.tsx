@@ -5,6 +5,15 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { DocumentReference, type SearchSource } from "./DocumentReference";
 import { rehypeMergedCells } from "@/lib/rehype-merged-cells";
+import {
+  CHAT_HEADINGS,
+  CHAT_SUBTITLES,
+  SAMPLE_QUESTIONS,
+  pickRandom,
+  sampleN,
+} from "@/lib/sample-prompts";
+
+const DISPLAY_QUESTION_COUNT = 5;
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -43,19 +52,24 @@ function buildHistory(msgs: ChatMessage[]): ChatTurn[] {
   return turns;
 }
 
-const SAMPLE_QUESTIONS = [
-  "有給休暇は何日もらえますか？",
-  "リモートワークの条件は？",
-  "セキュリティポリシーで禁止されていることは？",
-  "出張時の経費申請の流れを教えてください",
-  "育休中の給与はどうなりますか？",
-];
-
 export function ChatWindow() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // SSR と CSR 初回描画を一致させるため、初期値は配列の先頭で固定。
+  // マウント直後の useEffect でランダム化することでハイドレーション崩れを避ける。
+  const [heading, setHeading] = useState(CHAT_HEADINGS[0]);
+  const [subtitle, setSubtitle] = useState(CHAT_SUBTITLES[0]);
+  const [questions, setQuestions] = useState<string[]>(() =>
+    SAMPLE_QUESTIONS.slice(0, DISPLAY_QUESTION_COUNT),
+  );
+
+  useEffect(() => {
+    setHeading(pickRandom(CHAT_HEADINGS));
+    setSubtitle(pickRandom(CHAT_SUBTITLES));
+    setQuestions(sampleN(SAMPLE_QUESTIONS, DISPLAY_QUESTION_COUNT));
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -187,13 +201,13 @@ export function ChatWindow() {
         {messages.length === 0 && (
           <div className="text-center mt-10 sm:mt-16">
             <h2 className="text-xl sm:text-2xl font-bold text-slate-800 mb-2">
-              社内ドキュメントについて、なんでも聞いてください
+              {heading}
             </h2>
             <p className="text-sm text-slate-500 mb-8">
-              自然言語で質問すると、関連ドキュメントを横断検索して回答します。
+              {subtitle}
             </p>
             <div className="grid sm:grid-cols-2 gap-2 max-w-2xl mx-auto">
-              {SAMPLE_QUESTIONS.map((q) => (
+              {questions.map((q) => (
                 <button
                   key={q}
                   onClick={() => submit(q)}
