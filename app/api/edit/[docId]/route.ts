@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { loadIndex } from "@/lib/document-utils";
+import { gateForRole } from "@/lib/auth-helpers";
 
 export const runtime = "nodejs";
 
@@ -13,6 +14,9 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ docId: string }> },
 ) {
+  const gate = await gateForRole("編集");
+  if (gate.response) return gate.response;
+
   const { docId } = await params;
   const index = await loadIndex();
   const doc = index.find((d) => d.id === docId);

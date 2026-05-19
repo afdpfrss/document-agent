@@ -67,7 +67,9 @@ scripts/
 
 全 50 件のドキュメント本文を毎回渡すと約 8 万トークン以上消費する一方、本方式は概ね 1 万〜1.5 万トークンに収まる（質問依存）。
 
-実測値は `/api/search` の NDJSON ストリームで段階ごとに流れる `usage` イベント（`{stage, model, promptTokens, cachedTokens, outputTokens, totalTokens, cacheRatio}`）で確認できる。同じ値は `[search.usage] stage=... prompt=... cached=... ratio=...` 形式でサーバーログにも出力されるので、暗黙プロンプトキャッシュのヒット率を観測できる（v2 設計 Phase 2）。
+実測値は `/api/search` の NDJSON ストリームで段階ごとに流れる `usage` イベント（`{stage, model, promptTokens, cachedTokens, outputTokens, totalTokens, cacheRatio}`）で確認できる。同じ値は `[search.usage] stage=... prompt=... cached=... ratio=...` 形式でサーバーログにも出力される（v2 設計 Phase 2 = 暗黙キャッシュ観測 / Phase 8 = 明示キャッシュ）。
+
+Phase 8 では Step 1 の固定部分（system instruction + ドキュメント一覧）を `GoogleAICacheManager` で明示的キャッシュ化し、リクエストごとに送るのは可変部分（ベクトル上位ヒント + 質問本文）だけになる。キャッシュは process 内に in-memory で保持、index の内容ハッシュが変わると自動で作り直し、最小トークン数未満なら自動で disabled（暗黙キャッシュは引き続き効く）。挙動は `[prompt-cache] created step1 cache name=...` ログと `cacheRatio` の急増で観測可能。
 
 ## ドキュメントの再生成
 
@@ -140,7 +142,28 @@ API:
 - `POST /api/edit/[docId]/propose` — `{instruction, originalContent}` → `{edits[], applied: {content, statuses}}`
 - `POST /api/edit/[docId]/submit` — `{newContent, message?, prBody?}` → PR 作成結果
 
-設計 §10 で「全文再生成型編集を採用しない」「自動マージ禁止（人間レビュー必須）」と明示されており、本実装はその制約に沿っている。PoC のため認証なし（Phase 7 で Auth.js + ロール導入）。
+設計 §10 で「全文再生成型編集を採用しない」「自動マージ禁止（人間レビュー必須）」と明示されており、本実装はその制約に沿っている。
+
+## 認証 / ロール（v2 設計 Phase 7）
+
+Auth.js v5 + Google OAuth。ログイン必須は全画面・全 API（`/api/auth/*` を除く）。ロールは 2 種類:
+
+| ロール | 権限 |
+|---|---|
+| `一般` | 検索 (`/`、`/api/search`) のみ |
+| `編集` | 上記 + 編集 UI (`/edit/*`)・PR 作成 (`/api/edit/*`) |
+
+`編集` 割当は `EDITOR_EMAILS` 環境変数の allowlist（カンマ区切り）。これに含まれないログインユーザーは自動的に `一般`。
+
+```env
+# .env.local 抜粋
+AUTH_SECRET=（openssl rand -base64 32 など）
+AUTH_GOOGLE_ID=（Google Cloud Console > OAuth クライアント ID）
+AUTH_GOOGLE_SECRET=
+EDITOR_EMAILS=alice@example.com,bob@example.com
+```
+
+ロール情報は JWT に埋め込まれて毎リクエストで参照可。DB は使わない（設計 §10 "DB で文書本体を管理しない" 原則）。将来 viewer/proposer/approver/admin の 4 段階（設計 §4-D）に拡張する場合は `auth.ts` の `roleFor()` を入れ替えるだけ。
 
 ## デプロイ
 

@@ -11,6 +11,7 @@ import { NextResponse } from "next/server";
 import { loadIndex } from "@/lib/document-utils";
 import { proposeEditsViaLlm } from "@/lib/edit-llm";
 import { applyEdits } from "@/lib/edit-schema";
+import { gateForRole } from "@/lib/auth-helpers";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -24,6 +25,9 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ docId: string }> },
 ) {
+  const gate = await gateForRole("編集");
+  if (gate.response) return gate.response;
+
   const { docId } = await params;
   let body: Body;
   try {
