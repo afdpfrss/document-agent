@@ -140,7 +140,28 @@ API:
 - `POST /api/edit/[docId]/propose` — `{instruction, originalContent}` → `{edits[], applied: {content, statuses}}`
 - `POST /api/edit/[docId]/submit` — `{newContent, message?, prBody?}` → PR 作成結果
 
-設計 §10 で「全文再生成型編集を採用しない」「自動マージ禁止（人間レビュー必須）」と明示されており、本実装はその制約に沿っている。PoC のため認証なし（Phase 7 で Auth.js + ロール導入）。
+設計 §10 で「全文再生成型編集を採用しない」「自動マージ禁止（人間レビュー必須）」と明示されており、本実装はその制約に沿っている。
+
+## 認証 / ロール（v2 設計 Phase 7）
+
+Auth.js v5 + Google OAuth。ログイン必須は全画面・全 API（`/api/auth/*` を除く）。ロールは 2 種類:
+
+| ロール | 権限 |
+|---|---|
+| `一般` | 検索 (`/`、`/api/search`) のみ |
+| `編集` | 上記 + 編集 UI (`/edit/*`)・PR 作成 (`/api/edit/*`) |
+
+`編集` 割当は `EDITOR_EMAILS` 環境変数の allowlist（カンマ区切り）。これに含まれないログインユーザーは自動的に `一般`。
+
+```env
+# .env.local 抜粋
+AUTH_SECRET=（openssl rand -base64 32 など）
+AUTH_GOOGLE_ID=（Google Cloud Console > OAuth クライアント ID）
+AUTH_GOOGLE_SECRET=
+EDITOR_EMAILS=alice@example.com,bob@example.com
+```
+
+ロール情報は JWT に埋め込まれて毎リクエストで参照可。DB は使わない（設計 §10 "DB で文書本体を管理しない" 原則）。将来 viewer/proposer/approver/admin の 4 段階（設計 §4-D）に拡張する場合は `auth.ts` の `roleFor()` を入れ替えるだけ。
 
 ## デプロイ
 

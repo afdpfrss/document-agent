@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { searchDocumentsStream, type SearchEvent } from "@/lib/gemini-search";
+import { requireUser, UnauthenticatedError } from "@/lib/auth-helpers";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -15,6 +16,17 @@ function friendlyError(message: string): string {
 }
 
 export async function POST(req: Request) {
+  // Any authenticated user (一般 or 編集) can search — only edit actions
+  // require the elevated role.
+  try {
+    await requireUser();
+  } catch (e) {
+    if (e instanceof UnauthenticatedError) {
+      return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    throw e;
+  }
+
   let body: { question?: string };
   try {
     body = await req.json();
