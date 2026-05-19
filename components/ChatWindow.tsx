@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { DocumentReference, type SearchSource } from "./DocumentReference";
-import { LoadingIndicator } from "./LoadingIndicator";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -173,8 +172,6 @@ export function ChatWindow() {
         {messages.map((m, i) => (
           <MessageBubble key={i} message={m} />
         ))}
-
-        {loading && <LoadingIndicator />}
       </div>
 
       <div className="border-t border-slate-200 bg-white px-4 sm:px-6 py-4">
@@ -238,11 +235,10 @@ function MessageBubble({ message }: { message: ChatMessage }) {
               {message.streaming && <span className="streaming-caret" aria-hidden />}
             </div>
             {message.streaming && (
-              <div className="mt-3 flex items-center gap-1.5 text-xs text-slate-500">
+              <div className="mt-3 flex items-center gap-1.5">
                 <span className="streaming-dot" />
                 <span className="streaming-dot" style={{ animationDelay: "150ms" }} />
                 <span className="streaming-dot" style={{ animationDelay: "300ms" }} />
-                <span className="ml-1">生成中…</span>
               </div>
             )}
             {message.sources && message.sources.length > 0 && (

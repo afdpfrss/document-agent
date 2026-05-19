@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -11,6 +12,21 @@ interface Props {
 }
 
 export function DocViewer({ doc, sections }: Props) {
+  // Browsers normally honor #anchor on navigation, but when the target page is
+  // a Next.js client-rendered route opened via target="_blank", the hash can
+  // be processed before the section element exists. Re-trigger the scroll on
+  // mount and highlight the target briefly so the user sees where they landed.
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    if (!hash) return;
+    const el = document.getElementById(hash);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "auto", block: "start" });
+    el.classList.add("doc-section-highlight");
+    const t = setTimeout(() => el.classList.remove("doc-section-highlight"), 1800);
+    return () => clearTimeout(t);
+  }, []);
+
   return (
     <article className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
       <Link

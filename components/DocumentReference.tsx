@@ -42,7 +42,11 @@ export function DocumentReference({ sources }: { sources: SearchSource[] }) {
                   {s.category}
                 </span>
                 <a
-                  href={`/docs/${s.doc_id}`}
+                  href={
+                    s.section_ids[0]
+                      ? `/docs/${s.doc_id}#${s.section_ids[0]}`
+                      : `/docs/${s.doc_id}`
+                  }
                   target="_blank"
                   rel="noopener noreferrer"
                   className="font-semibold text-indigo-900 hover:text-indigo-700 hover:underline"
@@ -53,30 +57,14 @@ export function DocumentReference({ sources }: { sources: SearchSource[] }) {
               </div>
               {s.section_titles.length > 0 && (
                 <div className="text-slate-600 ml-1 flex flex-wrap gap-x-2 gap-y-1">
-                  {s.section_titles.map((t, i) => {
-                    const sid = s.section_ids[i];
-                    if (!sid) {
-                      return (
-                        <span
-                          key={t}
-                          className="before:content-['§_'] before:text-slate-400"
-                        >
-                          {t}
-                        </span>
-                      );
-                    }
-                    return (
-                      <a
-                        key={sid}
-                        href={`/docs/${s.doc_id}#${sid}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="before:content-['§_'] before:text-slate-400 text-indigo-900 hover:text-indigo-700 hover:underline"
-                      >
-                        {t}
-                      </a>
-                    );
-                  })}
+                  {s.section_titles.map((t) => (
+                    <span
+                      key={t}
+                      className="before:content-['§_'] before:text-slate-400"
+                    >
+                      {t}
+                    </span>
+                  ))}
                 </div>
               )}
             </li>

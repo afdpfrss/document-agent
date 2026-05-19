@@ -83,11 +83,15 @@ body {
 }
 
 /* Highlight the section linked via URL hash on the doc viewer */
-.doc-section:target {
+.doc-section:target,
+.doc-section.doc-section-highlight {
   background: var(--brand-soft);
   border-left: 4px solid var(--brand);
   padding-left: calc(1rem - 4px);
   border-radius: 4px;
+}
+.doc-section.doc-section-highlight {
+  transition: background-color 0.4s ease-out, border-color 0.4s ease-out;
 }
 
 /* Streaming indicators */
