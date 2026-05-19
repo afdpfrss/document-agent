@@ -20,13 +20,26 @@ export interface DocumentMeta {
 const ROOT = process.cwd();
 const INDEX_PATH = path.join(ROOT, "documents", "index.json");
 
-let indexCache: DocumentMeta[] | null = null;
+let indexCache: { mtimeMs: number; data: DocumentMeta[] } | null = null;
 
+// mtime-keyed cache: the upload pipeline rewrites index.json in-place, and
+// the search/edit/docs routes need to see fresh data even though they run
+// in separate Next.js dev bundles (each with its own module instance).
+// Checking stat is ~50 µs and avoids the explicit invalidation dance.
 export async function loadIndex(): Promise<DocumentMeta[]> {
-  if (indexCache) return indexCache;
+  const stat = await fs.stat(INDEX_PATH);
+  if (indexCache && indexCache.mtimeMs === stat.mtimeMs) return indexCache.data;
   const raw = await fs.readFile(INDEX_PATH, "utf8");
-  indexCache = JSON.parse(raw) as DocumentMeta[];
-  return indexCache;
+  const data = JSON.parse(raw) as DocumentMeta[];
+  indexCache = { mtimeMs: stat.mtimeMs, data };
+  return data;
+}
+
+// Kept for explicit invalidation paths (e.g. after a successful local commit
+// when we want the very next read to see the change without a stat). The
+// mtime check above handles the common path; this is belt-and-suspenders.
+export function invalidateIndexCache(): void {
+  indexCache = null;
 }
 
 function parseAllSections(content: string): Array<{ id: string; title: string; body: string }> {

@@ -118,14 +118,29 @@ async function convertPdf(buf) {
     .join("\n\n");
 }
 
+
+// Merge markers — viewer (lib/rehype-merged-cells.ts) collapses these
+// cells into rowspan/colspan at render time. Storage stays as plain GFM.
+const MERGE_LEFT = "←";
+const MERGE_UP = "↑";
+
 async function convertXlsx(buf) {
   const xlsx = await import("xlsx");
   const wb = xlsx.read(buf, { type: "buffer" });
   const blocks = [];
   for (const name of wb.SheetNames) {
     const sheet = wb.Sheets[name];
-    // sheet_to_csv preserves cell structure better than sheet_to_json for
-    // free-form spreadsheets where the first row isn't necessarily a header.
+    const merges = sheet["!merges"] ?? [];
+    for (const m of merges) {
+      for (let r = m.s.r; r <= m.e.r; r++) {
+        for (let c = m.s.c; c <= m.e.c; c++) {
+          if (r === m.s.r && c === m.s.c) continue;
+          const addr = xlsx.utils.encode_cell({ r, c });
+          const marker = c === m.s.c ? MERGE_UP : MERGE_LEFT;
+          sheet[addr] = { t: "s", v: marker };
+        }
+      }
+    }
     const csv = xlsx.utils.sheet_to_csv(sheet, { blankrows: false });
     blocks.push(`## ${name}\n\n${csvToMarkdownTable(csv)}`);
   }

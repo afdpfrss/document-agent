@@ -12,9 +12,12 @@ export async function SiteHeader() {
   if (!isAuthEnabled()) {
     return (
       <header className="border-b border-slate-200 bg-white px-4 sm:px-6 py-2 flex items-center justify-between">
-        <Link href="/" className="font-bold text-slate-800 text-sm sm:text-base">
-          社内ドキュメントエージェント
-        </Link>
+        <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+          <Link href="/" className="font-bold text-slate-800 text-sm sm:text-base">
+            社内ドキュメントエージェント
+          </Link>
+          <Nav />
+        </div>
         <span
           className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-amber-100 text-amber-800"
           title="AUTH_GOOGLE_ID と AUTH_GOOGLE_SECRET を .env.local に設定すると Phase 7 の Google OAuth が有効になります。"
@@ -28,9 +31,12 @@ export async function SiteHeader() {
   const session = await auth();
   return (
     <header className="border-b border-slate-200 bg-white px-4 sm:px-6 py-2 flex items-center justify-between">
-      <Link href="/" className="font-bold text-slate-800 text-sm sm:text-base">
-        社内ドキュメントエージェント
-      </Link>
+      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+        <Link href="/" className="font-bold text-slate-800 text-sm sm:text-base">
+          社内ドキュメントエージェント
+        </Link>
+        <Nav />
+      </div>
       {session?.user ? (
         <div className="flex items-center gap-3 text-xs sm:text-sm">
           <span className="text-slate-700">
@@ -62,5 +68,24 @@ export async function SiteHeader() {
         </Link>
       )}
     </header>
+  );
+}
+
+function Nav() {
+  return (
+    <nav className="flex items-center gap-2 sm:gap-3 text-[11px] sm:text-xs text-slate-600 whitespace-nowrap">
+      <Link href="/" className="hover:text-indigo-700">
+        チャット
+      </Link>
+      <Link href="/documents" className="hover:text-indigo-700">
+        文書一覧
+      </Link>
+      <Link href="/upload" className="hover:text-indigo-700">
+        アップロード
+      </Link>
+      <Link href="/pr" className="hover:text-indigo-700">
+        PR 一覧
+      </Link>
+    </nav>
   );
 }

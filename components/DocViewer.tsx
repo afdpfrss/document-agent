@@ -5,13 +5,18 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { DocumentMeta } from "@/lib/document-utils";
+import { rehypeMergedCells } from "@/lib/rehype-merged-cells";
 
 interface Props {
   doc: DocumentMeta;
   sections: Array<{ id: string; title: string; body: string }>;
+  // Server-computed: true when the viewer should see the "編集" entry point.
+  // Server still enforces auth on /edit and /api/edit; this just hides the
+  // link from viewers who would only get a 403.
+  canEdit?: boolean;
 }
 
-export function DocViewer({ doc, sections }: Props) {
+export function DocViewer({ doc, sections, canEdit = false }: Props) {
   // Browsers normally honor #anchor on navigation, but when the target page is
   // a Next.js client-rendered route opened via target="_blank", the hash can
   // be processed before the section element exists. Re-trigger the scroll on
@@ -51,9 +56,19 @@ export function DocViewer({ doc, sections }: Props) {
           </span>
           <span className="text-xs text-slate-400">{doc.id}</span>
         </div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-tight">
-          {doc.title}
-        </h1>
+        <div className="flex items-start justify-between gap-4">
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-tight">
+            {doc.title}
+          </h1>
+          {canEdit && (
+            <Link
+              href={`/edit/${doc.id}`}
+              className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-indigo-900 text-white rounded-md hover:bg-indigo-800"
+            >
+              この文書を編集
+            </Link>
+          )}
+        </div>
         {doc.summary && (
           <p className="mt-3 text-sm text-slate-600 leading-relaxed">
             {doc.summary}
@@ -91,7 +106,12 @@ export function DocViewer({ doc, sections }: Props) {
             {s.title}
           </h2>
           <div className="markdown">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{s.body}</ReactMarkdown>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeMergedCells]}
+            >
+              {s.body}
+            </ReactMarkdown>
           </div>
         </section>
       ))}

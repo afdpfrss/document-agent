@@ -54,6 +54,15 @@ export function DocumentReference({ sources }: { sources: SearchSource[] }) {
                   {s.title}
                 </a>
                 <span className="text-slate-400 text-[10px]">{s.doc_id}</span>
+                <a
+                  href={`/edit/${s.doc_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] text-slate-500 hover:text-indigo-700 hover:underline ml-auto"
+                  title="編集権限が必要です"
+                >
+                  編集
+                </a>
               </div>
               {s.section_titles.length > 0 && (
                 <div className="text-slate-600 ml-1 flex flex-wrap gap-x-2 gap-y-1">

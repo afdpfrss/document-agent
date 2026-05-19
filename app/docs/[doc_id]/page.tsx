@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { DocViewer } from "@/components/DocViewer";
 import { loadAllSections, loadIndex } from "@/lib/document-utils";
+import { requireUser, UnauthenticatedError } from "@/lib/auth-helpers";
 
 export async function generateStaticParams() {
   const index = await loadIndex();
@@ -26,5 +27,15 @@ export default async function DocPage({
   const { doc_id } = await params;
   const data = await loadAllSections(doc_id);
   if (!data) notFound();
-  return <DocViewer doc={data.doc} sections={data.sections} />;
+  // Role check is best-effort: a viewer without 編集 just doesn't see the
+  // edit button. /edit/[docId] and /api/edit/* still gate-check on the
+  // server side.
+  let canEdit = false;
+  try {
+    const user = await requireUser();
+    canEdit = user.role === "編集";
+  } catch (e) {
+    if (!(e instanceof UnauthenticatedError)) throw e;
+  }
+  return <DocViewer doc={data.doc} sections={data.sections} canEdit={canEdit} />;
 }

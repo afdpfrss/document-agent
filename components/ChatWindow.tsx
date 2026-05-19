@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { DocumentReference, type SearchSource } from "./DocumentReference";
+import { rehypeMergedCells } from "@/lib/rehype-merged-cells";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -11,6 +12,35 @@ interface ChatMessage {
   sources?: SearchSource[];
   error?: boolean;
   streaming?: boolean;
+  // True between the 一言 and the body — the server emitted `intermission`
+  // and we are waiting for the next delta. Render loading dots below the
+  // already-shown intro until the next chunk arrives.
+  intermission?: boolean;
+}
+
+interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+// Last 3 round-trips (6 messages) of clean history, with a soft char budget so
+// even chatty sessions don't blow the Step 1 prompt budget. Error bubbles and
+// empty placeholders are excluded so we don't echo failed turns back to the
+// model.
+function buildHistory(msgs: ChatMessage[]): ChatTurn[] {
+  const usable = msgs.filter(
+    (m) => !m.error && !m.streaming && m.content.trim().length > 0,
+  );
+  const tail = usable.slice(-6);
+  const turns: ChatTurn[] = [];
+  let budget = 1500;
+  for (let i = tail.length - 1; i >= 0; i--) {
+    const c = tail[i].content.slice(0, 500);
+    if (budget - c.length < 0) break;
+    budget -= c.length;
+    turns.unshift({ role: tail[i].role, content: c });
+  }
+  return turns;
 }
 
 const SAMPLE_QUESTIONS = [
@@ -38,7 +68,19 @@ export function ChatWindow() {
     const trimmed = question.trim();
     if (!trimmed || loading) return;
 
-    setMessages((m) => [...m, { role: "user", content: trimmed }]);
+    // Snapshot history BEFORE we push the new user message — the new one is
+    // sent as `question`, prior turns as `history`.
+    const history = buildHistory(messages);
+    // Push the user message AND the assistant placeholder in a single state
+    // update. The placeholder must appear immediately so the loading dots
+    // render right away — waiting until after `await fetch()` resolved was
+    // adding several seconds of dead air before any UI feedback (the server
+    // doesn't flush response headers until Step 1 starts producing output).
+    setMessages((m) => [
+      ...m,
+      { role: "user", content: trimmed },
+      { role: "assistant", content: "", sources: [], streaming: true },
+    ]);
     setInput("");
     setLoading(true);
 
@@ -56,27 +98,19 @@ export function ChatWindow() {
       const res = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: trimmed }),
+        body: JSON.stringify({ question: trimmed, history }),
       });
 
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => ({}));
-        setMessages((m) => [
-          ...m,
-          {
-            role: "assistant",
-            content: data.error ?? "エラーが発生しました。",
-            error: true,
-          },
-        ]);
+        updateAssistant({
+          content: data.error ?? "エラーが発生しました。",
+          error: true,
+          streaming: false,
+          intermission: false,
+        });
         return;
       }
-
-      // Placeholder assistant message we'll fill incrementally.
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", content: "", sources: [], streaming: true },
-      ]);
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -94,7 +128,7 @@ export function ChatWindow() {
           buffer = buffer.slice(nl + 1);
           if (!line) continue;
           let ev: {
-            type: "sources" | "delta" | "done" | "error";
+            type: "sources" | "delta" | "intermission" | "done" | "error";
             sources?: SearchSource[];
             text?: string;
             error?: string;
@@ -112,19 +146,22 @@ export function ChatWindow() {
               firstDelta = false;
               setLoading(false);
             }
-            updateAssistant({ content });
+            updateAssistant({ content, intermission: false });
+          } else if (ev.type === "intermission") {
+            updateAssistant({ intermission: true });
           } else if (ev.type === "done") {
-            updateAssistant({ streaming: false });
+            updateAssistant({ streaming: false, intermission: false });
           } else if (ev.type === "error") {
             updateAssistant({
               content: ev.error ?? "エラーが発生しました。",
               error: true,
               streaming: false,
+              intermission: false,
             });
           }
         }
       }
-      updateAssistant({ streaming: false });
+      updateAssistant({ streaming: false, intermission: false });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "通信エラーが発生しました。";
       setMessages((m) => {
@@ -226,16 +263,30 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       >
         {message.error ? (
           <p className="text-sm text-red-700">{message.content}</p>
+        ) : message.streaming && !message.content ? (
+          <div className="flex items-center gap-1.5 py-1" aria-label="読み込み中">
+            <span className="streaming-dot" />
+            <span className="streaming-dot" style={{ animationDelay: "150ms" }} />
+            <span className="streaming-dot" style={{ animationDelay: "300ms" }} />
+          </div>
         ) : (
           <>
             <div className="markdown">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeMergedCells]}
+              >
                 {message.content}
               </ReactMarkdown>
-              {message.streaming && <span className="streaming-caret" aria-hidden />}
+              {message.streaming && !message.intermission && (
+                <span className="streaming-caret" aria-hidden />
+              )}
             </div>
-            {message.streaming && (
-              <div className="mt-3 flex items-center gap-1.5">
+            {message.intermission && (
+              <div
+                className="mt-3 flex items-center gap-1.5"
+                aria-label="本文を生成中"
+              >
                 <span className="streaming-dot" />
                 <span className="streaming-dot" style={{ animationDelay: "150ms" }} />
                 <span className="streaming-dot" style={{ animationDelay: "300ms" }} />
