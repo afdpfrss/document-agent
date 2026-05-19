@@ -84,7 +84,7 @@ function Nav() {
         アップロード
       </Link>
       <Link href="/pr" className="hover:text-indigo-700">
-        PR 一覧
+        文書履歴
       </Link>
     </nav>
   );
