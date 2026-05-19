@@ -77,6 +77,23 @@ node scripts/generate-docs.mjs
 
 新規ドキュメントを追加する場合は `scripts/generate-docs.mjs` の `docs` 配列に追加するか、`documents/<カテゴリ>/` 配下に MD を置いて `documents/index.json` を手動で更新する。
 
+## 多形式ドキュメントの取り込み（v2 設計 Phase 3）
+
+PDF / Word(.docx) / Excel(.xlsx) / HTML / CSV / TXT / Markdown を 1 コマンドで MD 化＋フロントマター自動生成＋ `documents/index.json` 反映できる。
+
+```bash
+# LLM でメタデータ（title/category/keywords/summary）を自動生成して取り込み
+npm run ingest -- path/to/source.pdf
+
+# まず dry-run で出力を確認、書き込みなし
+npm run ingest -- path/to/source.docx --dry-run
+
+# LLM を使わず手動で category 指定（API キー不要・最小メタデータ）
+npm run ingest -- path/to/source.xlsx --no-llm --category その他業務ガイド
+```
+
+出力先は `documents/<category>/<id>_<title>.md`、id は既存最大の `doc_NNN` + 1。`## ` 見出しごとに `sec_N` のセクションマーカーが自動付与され、既存の段階的検索ロジックと互換になる。
+
 ## デプロイ
 
 Vercel: `vercel` コマンドで即デプロイ可。`GEMINI_API_KEY` を環境変数に登録すること。Next.js 16 + Node ランタイム（Fluid Compute）で動作。
