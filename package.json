@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "ingest": "node scripts/ingest.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -21,7 +22,11 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "mammoth": "^1.12.0",
+    "pdfjs-dist": "^5.7.284",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "turndown": "^7.2.4",
+    "typescript": "^5",
+    "xlsx": "^0.18.5"
   }
 }
