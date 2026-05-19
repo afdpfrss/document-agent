@@ -218,6 +218,143 @@ export async function getPullRequest(prNumber: number): Promise<PullRequestSumma
   };
 }
 
+export interface ProposeEditMultiInput {
+  files: { path: string; content: string }[];
+  // Repo-root-relative paths to delete in the same commit. Encoded as tree
+  // entries with `sha: null`, per the Git Data API contract.
+  deletions?: string[];
+  message: string;
+  prBody?: string;
+  branch?: string;
+}
+
+// Multi-file variant of proposeEdit. Uses the Git Data API
+// (blob → tree → commit → ref) so all files land in a single commit instead
+// of N successive PUTs. Failure after createRef triggers a deleteRef
+// rollback so we don't leave orphan branches behind.
+export async function proposeEditMulti(
+  input: ProposeEditMultiInput,
+): Promise<ProposeEditResult> {
+  const deletions = input.deletions ?? [];
+  if (input.files.length === 0 && deletions.length === 0) {
+    throw new Error("proposeEditMulti: files[] and deletions[] are both empty");
+  }
+
+  const cfg = readGithubConfig();
+  const oct = getOctokit();
+  const { owner, repo, baseBranch } = cfg;
+
+  const branchName =
+    input.branch ??
+    defaultBranchName(input.files[0]?.path ?? deletions[0] ?? "delete");
+
+  // 1. base commit + tree
+  const baseRef = await oct.rest.git.getRef({
+    owner,
+    repo,
+    ref: `heads/${baseBranch}`,
+  });
+  const baseSha = baseRef.data.object.sha;
+  const baseCommit = await oct.rest.git.getCommit({
+    owner,
+    repo,
+    commit_sha: baseSha,
+  });
+  const baseTreeSha = baseCommit.data.tree.sha;
+
+  // 2. blob per file (parallel — these are independent network round trips)
+  const blobs = await Promise.all(
+    input.files.map(async (f) => {
+      const blob = await oct.rest.git.createBlob({
+        owner,
+        repo,
+        content: Buffer.from(f.content, "utf8").toString("base64"),
+        encoding: "base64",
+      });
+      return { path: f.path, sha: blob.data.sha };
+    }),
+  );
+
+  // 3. one tree off the base tree. Deletions are encoded as entries with
+  //    `sha: null` (Git Data API contract). Octokit's type signature for
+  //    `tree[].sha` is `string | undefined`, but the REST API documents
+  //    `null` as the explicit "remove this path" signal, so we cast.
+  const tree = await oct.rest.git.createTree({
+    owner,
+    repo,
+    base_tree: baseTreeSha,
+    tree: [
+      ...blobs.map((b) => ({
+        path: b.path,
+        mode: "100644" as const,
+        type: "blob" as const,
+        sha: b.sha,
+      })),
+      ...deletions.map((p) => ({
+        path: p,
+        mode: "100644" as const,
+        type: "blob" as const,
+        sha: null as unknown as string,
+      })),
+    ],
+  });
+
+  // 4. one commit
+  const commit = await oct.rest.git.createCommit({
+    owner,
+    repo,
+    message: input.message,
+    tree: tree.data.sha,
+    parents: [baseSha],
+  });
+
+  // 5. branch ref. From here on, failures must roll back the ref so we
+  // don't leave orphan branches behind.
+  try {
+    await oct.rest.git.createRef({
+      owner,
+      repo,
+      ref: `refs/heads/${branchName}`,
+      sha: commit.data.sha,
+    });
+  } catch (err) {
+    const status = (err as { status?: number }).status;
+    if (status === 422) {
+      throw new Error(`Branch already exists: ${branchName}`);
+    }
+    throw err;
+  }
+
+  try {
+    const pr = await oct.rest.pulls.create({
+      owner,
+      repo,
+      head: branchName,
+      base: baseBranch,
+      title: input.message,
+      body: input.prBody ?? "",
+    });
+    return {
+      branch: branchName,
+      prNumber: pr.data.number,
+      prUrl: pr.data.html_url,
+      commitSha: commit.data.sha,
+    };
+  } catch (err) {
+    // Roll back the branch — leaving it behind makes the next attempt 422.
+    try {
+      await oct.rest.git.deleteRef({
+        owner,
+        repo,
+        ref: `heads/${branchName}`,
+      });
+    } catch {
+      // best-effort; the original error is more important
+    }
+    throw err;
+  }
+}
+
 // Generates a branch name that is unique-per-second and filesystem-safe.
 // Format: edit/<doc-id-or-basename>-<unix-ts>. We intentionally include the
 // file basename rather than the full path so the branch name stays short
