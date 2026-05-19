@@ -67,7 +67,9 @@ scripts/
 
 全 50 件のドキュメント本文を毎回渡すと約 8 万トークン以上消費する一方、本方式は概ね 1 万〜1.5 万トークンに収まる（質問依存）。
 
-実測値は `/api/search` の NDJSON ストリームで段階ごとに流れる `usage` イベント（`{stage, model, promptTokens, cachedTokens, outputTokens, totalTokens, cacheRatio}`）で確認できる。同じ値は `[search.usage] stage=... prompt=... cached=... ratio=...` 形式でサーバーログにも出力されるので、暗黙プロンプトキャッシュのヒット率を観測できる（v2 設計 Phase 2）。
+実測値は `/api/search` の NDJSON ストリームで段階ごとに流れる `usage` イベント（`{stage, model, promptTokens, cachedTokens, outputTokens, totalTokens, cacheRatio}`）で確認できる。同じ値は `[search.usage] stage=... prompt=... cached=... ratio=...` 形式でサーバーログにも出力される（v2 設計 Phase 2 = 暗黙キャッシュ観測 / Phase 8 = 明示キャッシュ）。
+
+Phase 8 では Step 1 の固定部分（system instruction + ドキュメント一覧）を `GoogleAICacheManager` で明示的キャッシュ化し、リクエストごとに送るのは可変部分（ベクトル上位ヒント + 質問本文）だけになる。キャッシュは process 内に in-memory で保持、index の内容ハッシュが変わると自動で作り直し、最小トークン数未満なら自動で disabled（暗黙キャッシュは引き続き効く）。挙動は `[prompt-cache] created step1 cache name=...` ログと `cacheRatio` の急増で観測可能。
 
 ## ドキュメントの再生成
 

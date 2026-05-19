@@ -7,6 +7,7 @@ import {
 } from "./document-utils";
 import { llmConfig, requireApiKey } from "./llm-config";
 import { renderVectorBlock, vectorSearch } from "./hybrid-search";
+import { getOrCreateStep1Cache, STEP1_SYSTEM_INSTRUCTION } from "./prompt-cache";
 
 export interface SearchSource {
   doc_id: string;
@@ -121,23 +122,18 @@ function normalizeLanguage(raw: unknown): string {
   return capped.length >= 2 ? capped : "ja";
 }
 
+const STEP1_GENERATION_CONFIG = {
+  temperature: 0.1,
+  responseMimeType: "application/json",
+  maxOutputTokens: 512,
+} as const;
+
 async function step1FindCandidates(
   question: string,
   index: DocumentMeta[],
 ): Promise<Step1Result> {
-  const client = getClient();
-  const model = client.getGenerativeModel({
-    model: llmConfig.candidateModel,
-    generationConfig: {
-      temperature: 0.1,
-      responseMimeType: "application/json",
-      maxOutputTokens: 512,
-    },
-  });
-
-  // Hybrid search: vector top-k runs in parallel with the (synchronous, cached)
-  // index snippet build. Vector path is best-effort — a null result just means
-  // the prompt falls back to the metadata-only shape that Phases 1-2 used.
+  // Hybrid search and snippet build run in parallel — the vector RTT overlaps
+  // with the (synchronous, cached) snippet build. Vector path is best-effort.
   const [vectorHits, indexSnippet] = await Promise.all([
     vectorSearch(question, 10).catch((e) => {
       console.warn("[search] vectorSearch threw, falling back:", e instanceof Error ? e.message : e);
@@ -152,30 +148,36 @@ async function step1FindCandidates(
   }
   const vectorBlock = vectorHits ? renderVectorBlock(vectorHits) : "";
 
-  const prompt = `あなたは社内ドキュメント検索のアシスタントです。下記のドキュメント一覧（フロントマター+サマリー）から、ユーザーの質問に答えるために本文を読むべきドキュメントとセクションを最大3件まで選んでください。あわせて、ユーザーの質問の言語を検出してください。
+  // Phase 8: try explicit context caching for the fixed prefix (system
+  // instruction + doc list). The cache layer returns null on any failure —
+  // missing key, too-small content, transient API error — and we fall back
+  // to the inline path that Phases 1-4 used.
+  const cached = await getOrCreateStep1Cache(indexSnippet);
 
-${vectorBlock}# ドキュメント一覧
+  const client = getClient();
+  let result;
+  if (cached) {
+    const model = client.getGenerativeModelFromCachedContent(cached, {
+      generationConfig: STEP1_GENERATION_CONFIG,
+    });
+    // Per-request body only carries the variable parts (vector hint + the
+    // actual question). Everything else lives in the cached prefix.
+    const variablePrompt = `${vectorBlock}# ユーザーの質問\n${question}`;
+    result = await withRetry(() => model.generateContent(variablePrompt));
+  } else {
+    const model = client.getGenerativeModel({
+      model: llmConfig.candidateModel,
+      systemInstruction: STEP1_SYSTEM_INSTRUCTION,
+      generationConfig: STEP1_GENERATION_CONFIG,
+    });
+    const inlinePrompt = `${vectorBlock}# ドキュメント一覧
 ${indexSnippet}
 
 # ユーザーの質問
-${question}
+${question}`;
+    result = await withRetry(() => model.generateContent(inlinePrompt));
+  }
 
-# 出力形式（JSONのみ。説明文や前置きは禁止）
-{
-  "language": "ja",
-  "candidates": [
-    {"doc_id": "doc_xxx", "section_ids": ["sec_x", "sec_y"], "reason": "なぜこのセクションが必要か（1-2文）"}
-  ]
-}
-
-注意:
-- "language" は質問本文の言語を BCP-47 の主言語サブタグ（2〜3文字）で表す。例: 日本語=ja, 英語=en, 中国語=zh, 韓国語=ko, フランス語=fr, スペイン語=es, ドイツ語=de, ベトナム語=vi, タイ語=th。判定に迷う場合は ja。
-- ドキュメント本文・キーワード・要約は日本語のままだが、質問が他言語でも意味的に関連するなら候補に含めてよい。
-- 質問と関係ないドキュメントは含めない。
-- 1ドキュメントあたりセクションは最大3つまで。
-- 該当なしの場合は {"language": "<検出した言語>", "candidates": []} を返す。`;
-
-  const result = await withRetry(() => model.generateContent(prompt));
   const text = result.response.text();
   const parsed = extractJson(text) as Partial<Step1Result>;
   return {
