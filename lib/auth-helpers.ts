@@ -24,7 +24,26 @@ export class ForbiddenError extends Error {
   }
 }
 
+// Feature switch: auth is on only when the Google OAuth credentials are
+// present. When off, every gate below short-circuits to a synthetic
+// AUTH_DISABLED_USER (編集) so the rest of the app (search, edit, PR) keeps
+// working without anyone signing in. Setting AUTH_GOOGLE_ID +
+// AUTH_GOOGLE_SECRET (and AUTH_SECRET for prod) flips Phase 7 behaviour
+// back on with no code change.
+export function isAuthEnabled(): boolean {
+  return Boolean(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET);
+}
+
+// The identity callers see when auth is disabled. Marked as 編集 so the
+// editor / PR flows are exercisable locally without an OAuth round-trip.
+const AUTH_DISABLED_USER: AuthorizedUser = {
+  email: "local-dev@auth-disabled",
+  role: "編集",
+  name: "Local Dev (auth disabled)",
+};
+
 export async function requireUser(): Promise<AuthorizedUser> {
+  if (!isAuthEnabled()) return AUTH_DISABLED_USER;
   const session = await auth();
   if (!session?.user?.email) throw new UnauthenticatedError();
   return {
@@ -35,6 +54,7 @@ export async function requireUser(): Promise<AuthorizedUser> {
 }
 
 export async function requireRole(role: Role): Promise<AuthorizedUser> {
+  if (!isAuthEnabled()) return AUTH_DISABLED_USER;
   const user = await requireUser();
   if (user.role !== role) throw new ForbiddenError(role);
   return user;
@@ -46,6 +66,7 @@ export async function requireRole(role: Role): Promise<AuthorizedUser> {
 export async function gateForRole(
   role: Role,
 ): Promise<{ user: AuthorizedUser; response: null } | { user: null; response: Response }> {
+  if (!isAuthEnabled()) return { user: AUTH_DISABLED_USER, response: null };
   try {
     const user = await requireRole(role);
     return { user, response: null };

@@ -144,24 +144,34 @@ API:
 
 設計 §10 で「全文再生成型編集を採用しない」「自動マージ禁止（人間レビュー必須）」と明示されており、本実装はその制約に沿っている。
 
-## 認証 / ロール（v2 設計 Phase 7）
+## 認証 / ロール（v2 設計 Phase 7、env で ON/OFF 可能）
 
-Auth.js v5 + Google OAuth。ログイン必須は全画面・全 API（`/api/auth/*` を除く）。ロールは 2 種類:
+Auth.js v5 + Google OAuth。`AUTH_GOOGLE_ID` と `AUTH_GOOGLE_SECRET` が両方セットされている時のみ有効になり、それ以外は**認証オフ**で全機能が誰でも使える（ローカル/開発用）。ヘッダ右に `認証オフ` バッジが表示される。
+
+### 認証オフ（既定）
+- ミドルウェアは何もせず素通し
+- `requireUser` / `requireRole` / `gateForRole` は内部の `AUTH_DISABLED_USER`（ロール `編集`）を返す
+- `/edit/*` も `/api/edit/*` も誰でも触れる
+- env 不要、`npm run dev` だけで全機能を試せる
+
+### 認証オン
+`.env.local` に下記を入れた瞬間にコード変更なしで Phase 7 挙動が復帰する:
+
+```env
+AUTH_SECRET=（openssl rand -base64 32 など）
+AUTH_GOOGLE_ID=（Google Cloud Console > OAuth クライアント ID）
+AUTH_GOOGLE_SECRET=
+EDITOR_EMAILS=alice@example.com,bob@example.com
+```
+
+ロール:
 
 | ロール | 権限 |
 |---|---|
 | `一般` | 検索 (`/`、`/api/search`) のみ |
 | `編集` | 上記 + 編集 UI (`/edit/*`)・PR 作成 (`/api/edit/*`) |
 
-`編集` 割当は `EDITOR_EMAILS` 環境変数の allowlist（カンマ区切り）。これに含まれないログインユーザーは自動的に `一般`。
-
-```env
-# .env.local 抜粋
-AUTH_SECRET=（openssl rand -base64 32 など）
-AUTH_GOOGLE_ID=（Google Cloud Console > OAuth クライアント ID）
-AUTH_GOOGLE_SECRET=
-EDITOR_EMAILS=alice@example.com,bob@example.com
-```
+`編集` 割当は `EDITOR_EMAILS` の allowlist（カンマ区切り、trim + lowercase）。allowlist に含まれないログインユーザーは自動的に `一般`。
 
 ロール情報は JWT に埋め込まれて毎リクエストで参照可。DB は使わない（設計 §10 "DB で文書本体を管理しない" 原則）。将来 viewer/proposer/approver/admin の 4 段階（設計 §4-D）に拡張する場合は `auth.ts` の `roleFor()` を入れ替えるだけ。
 
