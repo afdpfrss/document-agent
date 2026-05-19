@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@monaco-editor/react": "^4.7.0",
     "gray-matter": "^4.0.3",
     "next": "16.2.6",
     "octokit": "^5.0.5",
