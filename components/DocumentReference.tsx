@@ -37,23 +37,46 @@ export function DocumentReference({ sources }: { sources: SearchSource[] }) {
               key={s.doc_id}
               className="text-xs bg-indigo-50 border border-indigo-100 rounded-md px-3 py-2"
             >
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700 bg-white border border-indigo-200 rounded px-1.5 py-0.5">
                   {s.category}
                 </span>
-                <span className="font-semibold text-slate-800">{s.title}</span>
+                <a
+                  href={`/docs/${s.doc_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-indigo-900 hover:text-indigo-700 hover:underline"
+                >
+                  {s.title}
+                </a>
                 <span className="text-slate-400 text-[10px]">{s.doc_id}</span>
               </div>
               {s.section_titles.length > 0 && (
-                <div className="text-slate-600 ml-1">
-                  {s.section_titles.map((t) => (
-                    <span
-                      key={t}
-                      className="inline-block mr-2 mb-0.5 before:content-['§_'] before:text-slate-400"
-                    >
-                      {t}
-                    </span>
-                  ))}
+                <div className="text-slate-600 ml-1 flex flex-wrap gap-x-2 gap-y-1">
+                  {s.section_titles.map((t, i) => {
+                    const sid = s.section_ids[i];
+                    if (!sid) {
+                      return (
+                        <span
+                          key={t}
+                          className="before:content-['§_'] before:text-slate-400"
+                        >
+                          {t}
+                        </span>
+                      );
+                    }
+                    return (
+                      <a
+                        key={sid}
+                        href={`/docs/${s.doc_id}#${sid}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="before:content-['§_'] before:text-slate-400 text-indigo-900 hover:text-indigo-700 hover:underline"
+                      >
+                        {t}
+                      </a>
+                    );
+                  })}
                 </div>
               )}
             </li>

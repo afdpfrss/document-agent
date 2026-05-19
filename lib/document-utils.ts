@@ -29,34 +29,16 @@ export async function loadIndex(): Promise<DocumentMeta[]> {
   return indexCache;
 }
 
-export async function loadSections(
-  docId: string,
-  sectionIds: string[],
-  maxChars = 3000,
-): Promise<Array<{ id: string; title: string; body: string }>> {
-  const index = await loadIndex();
-  const doc = index.find((d) => d.id === docId);
-  if (!doc) return [];
-
-  const filePath = path.join(ROOT, doc.path);
-  const raw = await fs.readFile(filePath, "utf8");
-  const { content } = matter(raw);
-
-  // Split body by "## " headings; each chunk corresponds to one section.
-  // We rely on the embedded `<!-- section_id: sec_x -->` marker on the next line.
+function parseAllSections(content: string): Array<{ id: string; title: string; body: string }> {
   const lines = content.split("\n");
-  const sections = new Map<string, { title: string; body: string }>();
-
+  const out: Array<{ id: string; title: string; body: string }> = [];
   let currentId: string | null = null;
   let currentTitle = "";
   let buffer: string[] = [];
 
   const flush = () => {
     if (currentId) {
-      sections.set(currentId, {
-        title: currentTitle,
-        body: buffer.join("\n").trim(),
-      });
+      out.push({ id: currentId, title: currentTitle, body: buffer.join("\n").trim() });
     }
   };
 
@@ -75,10 +57,31 @@ export async function loadSections(
     buffer.push(line);
   }
   flush();
+  return out;
+}
 
+export async function loadAllSections(
+  docId: string,
+): Promise<{ doc: DocumentMeta; sections: Array<{ id: string; title: string; body: string }> } | null> {
+  const index = await loadIndex();
+  const doc = index.find((d) => d.id === docId);
+  if (!doc) return null;
+  const raw = await fs.readFile(path.join(ROOT, doc.path), "utf8");
+  const { content } = matter(raw);
+  return { doc, sections: parseAllSections(content) };
+}
+
+export async function loadSections(
+  docId: string,
+  sectionIds: string[],
+  maxChars = 3000,
+): Promise<Array<{ id: string; title: string; body: string }>> {
+  const data = await loadAllSections(docId);
+  if (!data) return [];
+  const byId = new Map(data.sections.map((s) => [s.id, s]));
   return sectionIds
     .map((sid) => {
-      const s = sections.get(sid);
+      const s = byId.get(sid);
       if (!s) return null;
       const body = s.body.length > maxChars ? s.body.slice(0, maxChars) + "…" : s.body;
       return { id: sid, title: s.title, body };

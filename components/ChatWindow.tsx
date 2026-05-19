@@ -11,6 +11,7 @@ interface ChatMessage {
   content: string;
   sources?: SearchSource[];
   error?: boolean;
+  streaming?: boolean;
 }
 
 const SAMPLE_QUESTIONS = [
@@ -75,7 +76,7 @@ export function ChatWindow() {
       // Placeholder assistant message we'll fill incrementally.
       setMessages((m) => [
         ...m,
-        { role: "assistant", content: "", sources: [] },
+        { role: "assistant", content: "", sources: [], streaming: true },
       ]);
 
       const reader = res.body.getReader();
@@ -113,14 +114,18 @@ export function ChatWindow() {
               setLoading(false);
             }
             updateAssistant({ content });
+          } else if (ev.type === "done") {
+            updateAssistant({ streaming: false });
           } else if (ev.type === "error") {
             updateAssistant({
               content: ev.error ?? "エラーが発生しました。",
               error: true,
+              streaming: false,
             });
           }
         }
       }
+      updateAssistant({ streaming: false });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "通信エラーが発生しました。";
       setMessages((m) => {
@@ -230,7 +235,16 @@ function MessageBubble({ message }: { message: ChatMessage }) {
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {message.content}
               </ReactMarkdown>
+              {message.streaming && <span className="streaming-caret" aria-hidden />}
             </div>
+            {message.streaming && (
+              <div className="mt-3 flex items-center gap-1.5 text-xs text-slate-500">
+                <span className="streaming-dot" />
+                <span className="streaming-dot" style={{ animationDelay: "150ms" }} />
+                <span className="streaming-dot" style={{ animationDelay: "300ms" }} />
+                <span className="ml-1">生成中…</span>
+              </div>
+            )}
             {message.sources && message.sources.length > 0 && (
               <DocumentReference sources={message.sources} />
             )}
