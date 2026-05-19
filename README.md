@@ -125,7 +125,22 @@ npm run propose-edit -- doc_001 ./new.md --message "就業規則の文言修正"
 | `GITHUB_REPO_NAME` | `document-agent` | 対象 repo |
 | `GITHUB_BASE_BRANCH` | `main` | PR のターゲット |
 
-`.github/CODEOWNERS` は社内チームのプレースホルダー入りでコミット済み。本番運用時は実在のチームに置き換え、GitHub のブランチ保護で "Require review from Code Owners" を有効化する。`lib/github.ts` の `proposeEdit()` は Phase 6（チャット編集 UI）の `{find, replace, reason}` 提案からも同じ経路で呼ばれる予定。
+`.github/CODEOWNERS` は社内チームのプレースホルダー入りでコミット済み。本番運用時は実在のチームに置き換え、GitHub のブランチ保護で "Require review from Code Owners" を有効化する。
+
+## チャットベース編集 UI（v2 設計 Phase 6 PoC）
+
+`/edit/<doc_id>` を開くと Monaco DiffEditor 付きのエディタが立ち上がる。右側のチャットに「~~を修正して」と指示すると、Gemini が `{find, replace, reason}[]` を構造化出力で返し、各提案が「適用可 / 原文に見つからない / 複数箇所に一致」のステータスカードで並ぶ。
+
+- 「差分に適用」で適用可な提案だけが差分に反映される（あいまい・未一致は無視）
+- 右側エディタ（差分の modified 側）は手動でも編集可能 — AI 提案を起点に人間が最終調整
+- 「PR を立てる」で Phase 5 の `proposeEdit()` 経由で GitHub に PR が立つ
+
+API:
+- `GET /api/edit/[docId]` — 現在のファイル本文を返す
+- `POST /api/edit/[docId]/propose` — `{instruction, originalContent}` → `{edits[], applied: {content, statuses}}`
+- `POST /api/edit/[docId]/submit` — `{newContent, message?, prBody?}` → PR 作成結果
+
+設計 §10 で「全文再生成型編集を採用しない」「自動マージ禁止（人間レビュー必須）」と明示されており、本実装はその制約に沿っている。PoC のため認証なし（Phase 7 で Auth.js + ロール導入）。
 
 ## デプロイ
 
