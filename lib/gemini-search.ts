@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, type UsageMetadata } from "@google/generative-ai";
 import {
   buildIndexSnippet,
   loadIndex,
@@ -15,9 +15,25 @@ export interface SearchSource {
   section_titles: string[];
 }
 
+// Per-stage token + implicit-cache observation. v2 design Phase 2: we don't
+// configure explicit caching yet — we just measure what Gemini's implicit
+// cache gives us (cachedContentTokenCount on UsageMetadata) so we can decide
+// whether explicit caching (Phase 8) is worth the engineering effort.
+export interface UsageSummary {
+  stage: "candidates" | "answer";
+  model: string;
+  promptTokens: number;
+  cachedTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  // cachedTokens / promptTokens, 0 when promptTokens === 0.
+  cacheRatio: number;
+}
+
 export type SearchEvent =
   | { type: "sources"; sources: SearchSource[] }
   | { type: "delta"; text: string }
+  | { type: "usage"; usage: UsageSummary }
   | { type: "done" }
   | { type: "error"; error: string };
 
@@ -32,6 +48,7 @@ interface Step1Result {
   // Used by Step 3 to lock response language and by the no-match fallback.
   language: string;
   candidates: Step1Candidate[];
+  usage: UsageSummary | null;
 }
 
 function getClient(): GoogleGenerativeAI {
@@ -63,6 +80,33 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
     }
   }
   throw lastErr;
+}
+
+function summarizeUsage(
+  stage: UsageSummary["stage"],
+  model: string,
+  meta: UsageMetadata | undefined,
+): UsageSummary | null {
+  if (!meta) return null;
+  const promptTokens = meta.promptTokenCount ?? 0;
+  const cachedTokens = meta.cachedContentTokenCount ?? 0;
+  return {
+    stage,
+    model,
+    promptTokens,
+    cachedTokens,
+    outputTokens: meta.candidatesTokenCount ?? 0,
+    totalTokens: meta.totalTokenCount ?? 0,
+    cacheRatio: promptTokens > 0 ? cachedTokens / promptTokens : 0,
+  };
+}
+
+// Structured single-line log so it's easy to grep server logs or pipe into
+// any log aggregator without a parser. Keys match UsageSummary fields.
+function logUsage(u: UsageSummary): void {
+  console.log(
+    `[search.usage] stage=${u.stage} model=${u.model} prompt=${u.promptTokens} cached=${u.cachedTokens} ratio=${u.cacheRatio.toFixed(3)} output=${u.outputTokens} total=${u.totalTokens}`,
+  );
 }
 
 function normalizeLanguage(raw: unknown): string {
@@ -120,6 +164,11 @@ ${question}
   return {
     language: normalizeLanguage(parsed.language),
     candidates: parsed.candidates ?? [],
+    usage: summarizeUsage(
+      "candidates",
+      llmConfig.candidateModel,
+      result.response.usageMetadata,
+    ),
   };
 }
 
@@ -130,7 +179,7 @@ async function* step3StreamAnswer(
     doc: DocumentMeta;
     sections: Array<{ id: string; title: string; body: string }>;
   }>,
-): AsyncGenerator<string> {
+): AsyncGenerator<string, UsageSummary | null, void> {
   const client = getClient();
   const model = client.getGenerativeModel({
     model: llmConfig.answerModel,
@@ -171,6 +220,11 @@ ${contextText}
     const t = chunk.text();
     if (t) yield t;
   }
+  // After the stream is drained, result.response resolves with the aggregated
+  // response — including usageMetadata for the full call. Returned via the
+  // generator's TReturn so the caller can emit a typed usage event.
+  const final = await result.response;
+  return summarizeUsage("answer", llmConfig.answerModel, final.usageMetadata);
 }
 
 // Fallback messages used when Step 1 returns zero candidates. Kept as a small
@@ -192,7 +246,12 @@ export async function* searchDocumentsStream(
 ): AsyncGenerator<SearchEvent> {
   const index = await loadIndex();
 
-  const { language, candidates } = await step1FindCandidates(question, index);
+  const step1 = await step1FindCandidates(question, index);
+  const { language, candidates } = step1;
+  if (step1.usage) {
+    logUsage(step1.usage);
+    yield { type: "usage", usage: step1.usage };
+  }
 
   if (candidates.length === 0) {
     yield { type: "sources", sources: [] };
@@ -229,8 +288,19 @@ export async function* searchDocumentsStream(
   }));
   yield { type: "sources", sources };
 
-  for await (const chunk of step3StreamAnswer(question, language, blocks)) {
-    yield { type: "delta", text: chunk };
+  // Explicit iteration (not for-await-of) so we can capture the generator's
+  // return value — the Step 3 UsageSummary — and emit it as a typed event.
+  const gen = step3StreamAnswer(question, language, blocks);
+  while (true) {
+    const { value, done } = await gen.next();
+    if (done) {
+      if (value) {
+        logUsage(value);
+        yield { type: "usage", usage: value };
+      }
+      break;
+    }
+    yield { type: "delta", text: value };
   }
   yield { type: "done" };
 }
