@@ -404,18 +404,6 @@ function PreviewEditor({
   return (
     <div className="flex-1 min-h-0 grid grid-cols-[320px_1fr] gap-4 mt-3">
       <aside className="overflow-y-auto space-y-3 text-sm">
-        {item.metaSource === "fallback" && (
-          <div className="rounded-md bg-amber-50 border border-amber-200 text-amber-900 text-xs px-3 py-2 space-y-1">
-            <div className="font-semibold">AIによる自動メタデータが使えませんでした</div>
-            <p className="leading-relaxed">
-              {item.metaError ??
-                "LLM が未設定のため、ファイル名から仮の値を入れています。"}
-            </p>
-            <p className="text-amber-800">
-              タイトル・カテゴリ・要約を手動で入力してください。
-            </p>
-          </div>
-        )}
         <Field label="ID">
           <input
             value={item.id}

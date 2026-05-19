@@ -12,6 +12,37 @@
 // Whitespace inside the cell text is trimmed before matching, so users can
 // write `| ← |` naturally. Only an exact match counts as a marker — a cell
 // containing `← see other table` stays as a regular cell.
+//
+// ----------------------------------------------------------------------------
+// Limitation: a cell whose content is *exactly* ← or ↑ cannot be displayed
+// as literal text — it will be absorbed as a merge marker. We accept this:
+//
+//   - GFM cannot express merges in any standard way. Tools that have tried
+//     converge on similar inline-marker conventions, all with the same
+//     tradeoff:
+//       * remark-extended-table / rehype-extended-table → ">" and "^",
+//         backslash-escape (`\>`, `\^`) for literals.
+//         https://github.com/wataru-chocola/remark-extended-table
+//       * Python-Markdown cell_row_span → "||" / "_..._" markers, NBSP entity
+//         as escape. https://github.com/Neepawa/cell_row_span
+//       * markdown-it-multimd-table → "||" / "^^".
+//         https://github.com/redbug312/markdown-it-multimd-table
+//       * Obsidian community proposal → "|<" / ">|" anchored to the pipe.
+//   - We chose ← / ↑ (non-ASCII arrows) over the ecosystem default of > / ^
+//     specifically because real spreadsheets almost never contain a cell of
+//     just "←" or "↑" — collision probability is dramatically lower than
+//     with ASCII markers. Adding a backslash-escape mechanism is feasible
+//     (mirrors remark-extended-table) but pushes complexity onto editors,
+//     and we judged the tradeoff not worth it for this use case.
+//   - Workarounds for the rare cell that genuinely needs to show ← / ↑ as
+//     content:
+//       * Pair with any other character: "← 戻る", "(←)", "「←」"
+//       * Use a different glyph: ⇐ ⟵ ⬅ ◀ / ⇑ ⟰ ⬆ ▲
+//       * Prefix a zero-width space (U+200B) — visually identical, defeats
+//         the exact-match check.
+//   - HTML entities (`&larr;`, `&#8592;`) do NOT escape: the parser decodes
+//     them before this plugin runs.
+// ----------------------------------------------------------------------------
 
 import type { Element, ElementContent, Root } from "hast";
 
