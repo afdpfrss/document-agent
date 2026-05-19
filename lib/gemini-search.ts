@@ -9,6 +9,7 @@ import { llmConfig, requireApiKey } from "./llm-config";
 import { renderVectorBlock, vectorSearch } from "./hybrid-search";
 import { getOrCreateStep1Cache, STEP1_SYSTEM_INSTRUCTION } from "./prompt-cache";
 import { OFFTOPIC_FALLBACK_INSTRUCTION, PERSONA_INSTRUCTION } from "./persona";
+import { pickIntro } from "./intro-phrases";
 
 export interface ChatTurn {
   role: "user" | "assistant";
@@ -145,51 +146,6 @@ const STEP1_GENERATION_CONFIG = {
   responseMimeType: "application/json",
   maxOutputTokens: 512,
 } as const;
-
-// Quick intro generation — a single short sentence that acknowledges the
-// question in シャイン's voice. Runs in parallel with Step 1 so it doesn't
-// add latency to the body. Uses the small candidate model since the output
-// is tiny. Always falls back to a generic line on failure rather than
-// throwing — the search must not fail because the intro call did.
-async function generateIntro(
-  question: string,
-  history: ChatTurn[] | undefined,
-): Promise<string> {
-  const FALLBACK = "ご質問ありがとうございます、関連する資料を確認しますね。";
-  try {
-    const client = getClient();
-    const model = client.getGenerativeModel({
-      model: llmConfig.candidateModel,
-      generationConfig: { temperature: 0.6, maxOutputTokens: 80 },
-    });
-    const historyBlock = renderHistoryBlock(history);
-    const prompt = `${PERSONA_INSTRUCTION}
-
-これからユーザーの質問について社内ドキュメントを検索します。検索を始める前に、シャインらしい「短い受け止めの一言」を 1 文だけ出力してください。
-
-# ルール
-- 1 文のみ。25〜50 字程度。
-- 質問の主題に軽く触れて、これから資料を確認する旨をやさしく伝える。
-- 「了解しました」「承知しました」のような定型句や、挨拶・自己紹介・絵文字は使わない。
-- Markdown 記法は使わない。前置き・後置きの説明文は禁止。出力は一言そのものだけ。
-
-${historyBlock}# ユーザーの質問
-${question}
-
-# 出力（1 文のみ）`;
-    const result = await withRetry(() => model.generateContent(prompt));
-    const text = result.response.text().trim();
-    if (!text) return FALLBACK;
-    // Strip surrounding quotes or stray newlines, cap length defensively.
-    const cleaned = text.replace(/^["'「『]+|["'」』]+$/g, "").split(/\r?\n/)[0].trim();
-    return cleaned.length > 0 ? cleaned.slice(0, 80) : FALLBACK;
-  } catch (e) {
-    console.warn(
-      `[search.intro] failed, using fallback: ${e instanceof Error ? e.message : e}`,
-    );
-    return FALLBACK;
-  }
-}
 
 async function step1FindCandidates(
   question: string,
@@ -409,18 +365,13 @@ export async function* searchDocumentsStream(
 ): AsyncGenerator<SearchEvent> {
   const index = await loadIndex();
 
-  // Kick off the intro (短い一言) and Step 1 in parallel so the intro's
-  // latency is hidden behind Step 1's. The intro is a separate small LLM
-  // call rather than a marker inside Step 3's output — much more reliable
-  // than asking the model to emit a custom token at a specific spot.
-  const introPromise = generateIntro(question, history);
-  const step1Promise = step1FindCandidates(question, index, history);
+  // 受け止めの一言はルールベースのプリセットから即決定する（旧 generateIntro の
+  // Gemini 呼び出しを廃止）。LLM 待ちが消えるので Step 1 と直列にしても遅延は
+  // 増えない。
+  const intro = pickIntro(question);
+  yield { type: "delta", text: intro };
 
-  // Stream the intro first so the user sees a personalized 一言 quickly.
-  const intro = await introPromise;
-  if (intro) yield { type: "delta", text: intro };
-
-  const step1 = await step1Promise;
+  const step1 = await step1FindCandidates(question, index, history);
   const { language, candidates } = step1;
   if (step1.usage) {
     logUsage(step1.usage);
