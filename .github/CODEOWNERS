@@ -1,0 +1,33 @@
+# CODEOWNERS — review routing for v2 document edits.
+#
+# Every PR opened by scripts/propose-edit.mjs (or the future chat-edit UI)
+# touches a file under documents/<category>/, so we route reviewers per
+# category. Replace the placeholder team handles below with real teams
+# before turning on branch protection ("Require review from Code Owners").
+#
+# Match order matters in CODEOWNERS — first match wins. Keep the
+# most-specific rules at the top and a final catch-all at the bottom.
+#
+# docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-policies/about-code-owners
+
+# --- documents/ — per-category approvers ---------------------------------
+documents/ISMS関連文書/      @afdpfrss/security-team
+documents/人事考課/         @afdpfrss/hr-team
+documents/年末調整/         @afdpfrss/hr-team
+documents/労使協定/         @afdpfrss/hr-team
+documents/各種規程・基準/   @afdpfrss/legal-team
+documents/各種マニュアル/   @afdpfrss/ops-team
+documents/設備運用ルール/   @afdpfrss/facilities-team
+documents/発令/             @afdpfrss/hr-team
+documents/会社案内/         @afdpfrss/comms-team
+documents/その他業務ガイド/ @afdpfrss/ops-team
+
+# --- code / config — engineering owns the platform itself ---------------
+/lib/        @afdpfrss/eng
+/app/        @afdpfrss/eng
+/components/ @afdpfrss/eng
+/scripts/    @afdpfrss/eng
+/docs/       @afdpfrss/eng
+
+# --- catch-all ----------------------------------------------------------
+*            @afdpfrss/eng
