@@ -8,6 +8,11 @@
 import { auth } from "@/auth";
 
 export default auth((req) => {
+  // Feature switch: when Google OAuth env vars aren't set, the entire auth
+  // layer is off (per Phase 7 toggle in lib/auth-helpers.ts). Bail before
+  // reading req.auth so we don't depend on AUTH_SECRET either.
+  if (!process.env.AUTH_GOOGLE_ID || !process.env.AUTH_GOOGLE_SECRET) return;
+
   const { pathname } = req.nextUrl;
 
   // Auth.js's own pages must be reachable while unauthenticated, otherwise
