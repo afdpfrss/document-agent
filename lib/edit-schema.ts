@@ -58,7 +58,11 @@ export function applyEdits(original: string, edits: FindReplaceEdit[]): EditAppl
       statuses.push({ kind: "ambiguous", index: i, find, matches });
       continue;
     }
-    content = content.replace(find, replace);
+    // Use a replacer function: passing `replace` as a string would make
+    // String.prototype.replace interpret `$&`, `$1`, `$\``, `$'`, `$$` in the
+    // replacement text — `replace` is verbatim content and must be inserted
+    // literally.
+    content = content.replace(find, () => replace);
     statuses.push({ kind: "ok", index: i });
   }
   return { content, statuses };

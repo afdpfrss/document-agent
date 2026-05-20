@@ -37,6 +37,15 @@ export function parseProposerMarker(
   return m ? m[1] : null;
 }
 
+// PR 本文に差し込む自由記述（summary / 各編集の reason）から HTML コメント
+// 境界を無害化する。これがないと、モデル生成テキストに
+// <!-- poka-yoke:proposer=... --> や <!-- poka-yoke:demo --> を仕込み、末尾の
+// 正規マーカーより前方に偽マーカーを出して提案者詐称・SoD 回避ができてしまう
+// （parseProposerMarker / DEMO_MARKER_RE は最初の一致を採用するため）。
+function sanitizeForPrBody(text: string): string {
+  return text.replace(/<!--/g, "<! --").replace(/-->/g, "-- >");
+}
+
 // 認証オフ時に server.ts が渡す提案者センチネル。SoD では検証不能なので
 // マーカー値・ラベルとも "unverified" にして fail closed させる。
 export const AUTH_OFF_PROPOSER = "mcp-connector (認証オフ)";
@@ -200,10 +209,10 @@ export async function proposeDocumentEdit(
     `対象: \`${doc.path}\` (${doc.id} — ${doc.title})`,
     "",
     `## 概要`,
-    summary,
+    sanitizeForPrBody(summary),
     "",
     `## 各編集の理由`,
-    ...edits.map((e, i) => `${i + 1}. ${e.reason}`),
+    ...edits.map((e, i) => `${i + 1}. ${sanitizeForPrBody(e.reason)}`),
     "",
     `---`,
     `この PR は人間レビュー前提です。差分を確認のうえマージしてください（自動マージなし / v2 設計 §10）。`,
@@ -317,13 +326,17 @@ export async function proposeRelatedEdit(
     return { ok: false, error: VERBATIM_FAIL_MSG, failures };
   }
 
-  const changedFiles = outcomes
-    .filter((o) => !o.outcome.unchanged)
-    .map((o) => ({ path: o.outcome.doc.path, content: o.outcome.content }));
-  if (changedFiles.length === 0) {
+  // 横展開は all-or-nothing。逐語一致はしたが結果が原文と同一になる文書が
+  // 1 件でもあれば（find と replace が同じ等）、その文書は実質未修正なので
+  // PR を作らず差し戻す。proposeDocumentEdit の unchanged 扱いと整合させ、
+  // 「一括修正したつもりで一部が無修正のまま」という取りこぼしを防ぐ。
+  const unchanged = outcomes.filter((o) => o.outcome.unchanged);
+  if (unchanged.length > 0) {
     return {
       ok: false,
-      error: "すべての編集が原文と同一でした。PR は作成していません。",
+      error: `次の文書は編集後も原文と同一です（逐語一致したが変更が生じていません）: ${unchanged
+        .map((o) => o.docId)
+        .join(", ")}。横展開は対象文書すべてが実際に変更されて初めて PR を作成します。find / replace を見直して再試行してください。PR は作成していません。`,
     };
   }
 
@@ -334,15 +347,14 @@ export async function proposeRelatedEdit(
     `提案者: ${proposer}`,
     "",
     `## 概要`,
-    summary,
+    sanitizeForPrBody(summary),
     "",
     `## 対象文書と編集理由`,
     ...outcomes.flatMap(({ docId, outcome }) => {
       const c = changes.find((x) => x.doc_id === docId)!;
-      const suffix = outcome.unchanged ? "（変更なし — PR から除外）" : "";
       return [
-        `### ${outcome.doc.id} — ${outcome.doc.title} \`${outcome.doc.path}\`${suffix}`,
-        ...c.edits.map((e, i) => `${i + 1}. ${e.reason}`),
+        `### ${outcome.doc.id} — ${outcome.doc.title} \`${outcome.doc.path}\``,
+        ...c.edits.map((e, i) => `${i + 1}. ${sanitizeForPrBody(e.reason)}`),
         "",
       ];
     }),
@@ -353,7 +365,10 @@ export async function proposeRelatedEdit(
   ].join("\n");
 
   const result = await proposeEditMulti({
-    files: changedFiles,
+    files: outcomes.map((o) => ({
+      path: o.outcome.doc.path,
+      content: o.outcome.content,
+    })),
     message: deco.title,
     prBody,
   });
@@ -366,7 +381,7 @@ export async function proposeRelatedEdit(
 
   return {
     ok: true,
-    doc_ids: outcomes.filter((o) => !o.outcome.unchanged).map((o) => o.docId),
+    doc_ids: outcomes.map((o) => o.docId),
     branch: result.branch,
     pr_number: result.prNumber,
     pr_url: result.prUrl,
