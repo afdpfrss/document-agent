@@ -1,9 +1,10 @@
 # CODEOWNERS — review routing for v2 document edits.
 #
-# Every PR opened by scripts/propose-edit.mjs (or the future chat-edit UI)
-# touches a file under documents/<category>/, so we route reviewers per
-# category. Replace the placeholder team handles below with real teams
-# before turning on branch protection ("Require review from Code Owners").
+# Every PR opened by the MCP connector (propose_edit / propose_related_edit)
+# or scripts/propose-edit.mjs touches a file under documents/<category>/, so we
+# route reviewers per category. The team slugs below must exist as real GitHub
+# teams before turning on branch protection ("Require review from Code Owners")
+# — see .github/branch-protection.md for the operational runbook.
 #
 # Match order matters in CODEOWNERS — first match wins. Keep the
 # most-specific rules at the top and a final catch-all at the bottom.
@@ -28,6 +29,14 @@ documents/その他業務ガイド/ @afdpfrss/ops-team
 /components/ @afdpfrss/eng
 /scripts/    @afdpfrss/eng
 /docs/       @afdpfrss/eng
+
+# --- governance files — the poka-yoke guardrails themselves --------------
+# These cannot be changed without engineering review, so the separation-of-
+# duties map and the CI workflows can't be quietly weakened.
+/.github/edit-authors.json    @afdpfrss/eng
+/.github/workflows/           @afdpfrss/eng
+/.github/branch-protection.md @afdpfrss/eng
+/.github/CODEOWNERS           @afdpfrss/eng
 
 # --- catch-all ----------------------------------------------------------
 *            @afdpfrss/eng

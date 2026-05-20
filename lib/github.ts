@@ -391,6 +391,67 @@ export async function addPullRequestLabels(
   });
 }
 
+// --- merge (ポカヨケ設計 柱D — merge_edit MCP ツールの裏側) ----------------
+
+export type MergeBlockReason = "ci" | "review" | "stale" | "conflict" | "other";
+
+export interface MergeResult {
+  ok: boolean;
+  merged?: boolean;
+  mergeCommitSha?: string;
+  blockedBy?: MergeBlockReason;
+  message: string;
+}
+
+// Best-effort classification of GitHub's "not mergeable" (405) message into a
+// reason. The message text is not a stable API, so callers should also surface
+// the concrete check/review state for an accurate diagnosis.
+function classifyBlock(message: string): MergeBlockReason {
+  const m = message.toLowerCase();
+  if (m.includes("status check") || m.includes("required check")) return "ci";
+  if (m.includes("review") || m.includes("approv")) return "review";
+  if (m.includes("up to date") || m.includes("out of date") || m.includes("behind")) {
+    return "stale";
+  }
+  if (m.includes("conflict")) return "conflict";
+  return "other";
+}
+
+// Triggers a PR merge. Safe to expose via merge_edit BECAUSE GitHub branch
+// protection rejects any merge that isn't fully gated (CI green + CODEOWNERS
+// approval + base up-to-date + SoD pass). A 405/409 is translated into a
+// structured blockedBy reason rather than a raw Octokit throw — this is what
+// keeps merge_edit from ever forcing an ungated merge.
+export async function mergePullRequest(prNumber: number): Promise<MergeResult> {
+  const { owner, repo } = readGithubConfig();
+  const oct = getOctokit();
+  try {
+    const res = await oct.rest.pulls.merge({
+      owner,
+      repo,
+      pull_number: prNumber,
+    });
+    return {
+      ok: true,
+      merged: res.data.merged,
+      mergeCommitSha: res.data.sha,
+      message: res.data.message ?? "merged",
+    };
+  } catch (err) {
+    const status = (err as { status?: number }).status;
+    const raw = err instanceof Error ? err.message : String(err);
+    if (status === 405) {
+      // Not mergeable — branch protection / required reviews / required checks.
+      return { ok: false, blockedBy: classifyBlock(raw), message: raw };
+    }
+    if (status === 409) {
+      // Head changed since the SHA we read, or an unresolved merge conflict.
+      return { ok: false, blockedBy: "conflict", message: raw };
+    }
+    throw err;
+  }
+}
+
 export interface ProposeEditMultiInput {
   files: { path: string; content: string }[];
   // Repo-root-relative paths to delete in the same commit. Encoded as tree

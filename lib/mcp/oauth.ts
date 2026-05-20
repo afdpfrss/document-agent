@@ -27,7 +27,8 @@ export const CLIENT_ID_TTL = 60 * 60 * 24 * 365; // 1 year
 
 export const SCOPE_READ = "mcp:read";
 export const SCOPE_EDIT = "mcp:edit";
-export const SUPPORTED_SCOPES = [SCOPE_READ, SCOPE_EDIT] as const;
+export const SCOPE_MERGE = "mcp:merge";
+export const SUPPORTED_SCOPES = [SCOPE_READ, SCOPE_EDIT, SCOPE_MERGE] as const;
 
 // MCP OAuth is enabled exactly when the app's auth layer is on (Google OIDC
 // configured). When auth is off the whole app is open for local dev and the
@@ -329,10 +330,14 @@ export function hasMcpAllowlist(): boolean {
   );
 }
 
-// Scope a user is entitled to. Editors (EDITOR_EMAILS — the existing Phase 7
-// allowlist) additionally get mcp:edit, which Phase 3's propose_edit checks.
+// Scope a user is entitled to. Everyone gets mcp:read. EDITOR_EMAILS adds
+// mcp:edit (propose_edit / propose_related_edit). MERGER_EMAILS adds mcp:merge
+// (merge_edit) — kept a separate allowlist so "can propose" and "can trigger a
+// merge" are distinct entitlements (ポカヨケ設計 柱3、defence in depth).
 export function entitledScope(email: string): string {
-  const editors = envList("EDITOR_EMAILS");
-  const isEditor = editors.includes(email.trim().toLowerCase());
-  return isEditor ? `${SCOPE_READ} ${SCOPE_EDIT}` : SCOPE_READ;
+  const e = email.trim().toLowerCase();
+  const scopes: string[] = [SCOPE_READ];
+  if (envList("EDITOR_EMAILS").includes(e)) scopes.push(SCOPE_EDIT);
+  if (envList("MERGER_EMAILS").includes(e)) scopes.push(SCOPE_MERGE);
+  return scopes.join(" ");
 }

@@ -19,13 +19,14 @@ import {
   parseProposerMarker,
   proposeDocumentEdit,
 } from "./edit-tool";
-import { isMcpAuthEnabled, SCOPE_EDIT } from "./oauth";
+import { isMcpAuthEnabled, SCOPE_EDIT, SCOPE_MERGE } from "./oauth";
 import {
   getPullRequest,
   getPullRequestChecks,
   getPullRequestDiff,
   getPullRequestReviews,
   isGithubConfigured,
+  mergePullRequest,
 } from "@/lib/github";
 
 export const MCP_SERVER_NAME = "document-agent";
@@ -234,6 +235,109 @@ export function createMcpServer(): McpServer {
         return asToolResult({
           ok: false,
           error: `PR #${pr_number} を取得できませんでした: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        });
+      }
+    },
+  );
+
+  server.registerTool(
+    "merge_edit",
+    {
+      title: "編集 PR のマージ",
+      description:
+        "指定した PR をマージする。GitHub のブランチ保護が「CI green・CODEOWNERS 承認・base 最新・SoD pass」をすべて満たさないマージを API レベルで拒否するため、ゲート未達なら何が未達かを構造化エラーで返す。これは自動マージではない — 人間が GitHub 上で差分を確認・承認した後に人間が明示的に起動するアクション。confirm_pr_url は対象 PR の URL で、pr_number の PR の URL と一致しなければマージしない（PR 取り違え防止）。",
+      inputSchema: {
+        pr_number: z
+          .number()
+          .int()
+          .positive()
+          .describe("マージ対象の PR 番号"),
+        confirm_pr_url: z
+          .string()
+          .url()
+          .describe(
+            "マージ対象 PR の URL。pr_number の PR の html_url と一致しなければマージを中止する",
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: true,
+      },
+    },
+    async ({ pr_number, confirm_pr_url }, extra) => {
+      // 書き込み操作: 認証 ON のとき mcp:merge スコープを要求する。
+      if (isMcpAuthEnabled()) {
+        const scopes = extra.authInfo?.scopes ?? [];
+        if (!scopes.includes(SCOPE_MERGE)) {
+          return asToolResult({
+            ok: false,
+            error:
+              "この操作には mcp:merge スコープが必要です。MERGER_EMAILS に登録されたアカウントでコネクタを認可し直してください。",
+          });
+        }
+      }
+      if (!isGithubConfigured()) {
+        return asToolResult({
+          ok: false,
+          error: "GitHub バックエンドが未設定です（GITHUB_TOKEN）。",
+        });
+      }
+      try {
+        const pr = await getPullRequest(pr_number);
+        // 取り違え防止 — URL 不一致ならマージしない。
+        if (pr.url !== confirm_pr_url) {
+          return asToolResult({
+            ok: false,
+            error: `confirm_pr_url が PR #${pr_number} の URL と一致しません（指定: ${confirm_pr_url} / 実際: ${pr.url}）。マージを中止しました。`,
+          });
+        }
+        if (pr.merged) {
+          return asToolResult({
+            ok: false,
+            error: `PR #${pr_number} は既にマージ済みです。`,
+          });
+        }
+        if (pr.state !== "open") {
+          return asToolResult({
+            ok: false,
+            error: `PR #${pr_number} は open ではありません（state: ${pr.state}）。`,
+          });
+        }
+
+        const result = await mergePullRequest(pr_number);
+        if (result.ok) {
+          return asToolResult({
+            ok: true,
+            pr_number,
+            merged: true,
+            merge_commit_sha: result.mergeCommitSha,
+            message: `PR #${pr_number} をマージしました。`,
+          });
+        }
+
+        // ブロックされた — 何が red かを具体的に示す。
+        const [checks, reviewInfo] = await Promise.all([
+          getPullRequestChecks(pr_number).catch(() => []),
+          getPullRequestReviews(pr_number).catch(() => null),
+        ]);
+        return asToolResult({
+          ok: false,
+          blocked_by: result.blockedBy ?? "other",
+          error: `PR #${pr_number} はマージできません（ブランチ保護のゲート未達）。`,
+          github_message: result.message,
+          checks,
+          reviews: reviewInfo?.reviews ?? [],
+          mergeable_state: reviewInfo?.mergeableState ?? "unknown",
+          next_step:
+            "review_edit で差分と CI 状況を確認し、未達のゲート（CI / CODEOWNERS 承認 / base 最新化 / SoD）を解消してから再試行すること。",
+        });
+      } catch (err) {
+        return asToolResult({
+          ok: false,
+          error: `マージ処理でエラーが発生しました: ${
             err instanceof Error ? err.message : String(err)
           }`,
         });
