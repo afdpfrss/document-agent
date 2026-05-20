@@ -7,6 +7,7 @@
 import {
   ACCESS_TOKEN_TTL,
   consumeAuthCode,
+  entitledScope,
   isAllowedMcpUser,
   isMcpAuthEnabled,
   issueAccessToken,
@@ -124,10 +125,14 @@ function handleRefreshToken(req: Request, form: FormData): Response {
       "User is no longer allowed to use this connector.",
     );
   }
+  // Recompute the scope from the current allowlists rather than copying it
+  // from the (up to 30-day-old) refresh token, so removing a user from
+  // EDITOR_EMAILS / MERGER_EMAILS takes effect on the next refresh instead of
+  // persisting a stale mcp:edit / mcp:merge entitlement until expiry.
   return tokenResponse({
     email,
     name: typeof claims.name === "string" ? claims.name : email,
-    scope: typeof claims.scope === "string" ? claims.scope : SCOPE_READ,
+    scope: entitledScope(email),
     resource:
       typeof claims.aud === "string" ? claims.aud : mcpResourceUrl(req),
   });

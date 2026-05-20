@@ -113,6 +113,16 @@ export function verifyJwt(token: string): JwtClaims | null {
   if (parts.length !== 3) return null;
   const [h, p, sig] = parts;
   if (!timingEqual(sig, hmac(`${h}.${p}`, secret))) return null;
+  // Pin the algorithm. signJwt only ever issues HS256, and verification
+  // always uses HS256 — so reject any token whose header claims otherwise
+  // instead of trusting an attacker-controlled `alg` field (defence in depth
+  // against JWT algorithm-confusion / `alg:none`).
+  try {
+    const header = JSON.parse(Buffer.from(h, "base64url").toString("utf8"));
+    if (header?.alg !== "HS256" || header?.typ !== "JWT") return null;
+  } catch {
+    return null;
+  }
   let claims: JwtClaims;
   try {
     claims = JSON.parse(Buffer.from(p, "base64url").toString("utf8"));
