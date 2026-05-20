@@ -126,7 +126,7 @@
 提供レイヤー（§3 ④）に「リモート MCP サーバ」を追加する。開発者側が Gemini を呼んで回答生成する従来構成に対し、**検索 API のみをホスティングし、クエリ時の推論（候補の最終選定・回答生成）は利用者側の Claude が負担する**構成。開発者は LLM 推論コストを負わず、利用者は自分の契約・トークンで社内文書を検索・質問できる。
 
 - **エンドポイント**: `app/api/mcp/route.ts`（Next.js ルートハンドラ）。公式 SDK `@modelcontextprotocol/sdk` + Streamable HTTP トランスポートで実装。
-- **ツール**: `search_documents`（候補プール）/ `get_sections`（セクション本文）/ `list_categories`（カテゴリ一覧）。Phase 3 で `propose_edit`（構造化編集 → PR）を追加。
+- **ツール**: `search_documents`（候補プール）/ `get_sections`（セクション本文）/ `list_categories`（カテゴリ一覧）/ `propose_edit`（構造化編集 `{find, replace, reason}[]` を逐語適用し branch + PR を作成）。`propose_edit` は MCP の input_schema で編集構造を強制（Gemini の responseSchema の代替）し、`mcp:edit` スコープを要求。逐語マッチに失敗した編集が 1 件でもあれば PR を作らず診断を返す。反映は GitHub の PR レビューで（自動マージなし、§10 整合）。
 - **段階的開示の維持**: サーバはクエリ時に回答生成 LLM を呼ばない。各ツールが返す情報量を絞る（フロントマター → セクション本文）ことで §3 の段階的開示構造をツール境界上で保つ。
 - **ベクトル検索**: クエリ埋め込みのみ Gemini を使用。`GEMINI_API_KEY` 未設定時はメタデータ駆動のみへ自動フォールバック（既存 `lib/hybrid-search.ts` の挙動を流用）。
 - **疎結合**: ツール実装（`lib/mcp/`）は既存の `lib/` モジュール（`document-utils` / `hybrid-search` / `edit-schema` / `github`）を import するだけにとどめ、既存の Gemini チャットパイプラインと共存させる。
