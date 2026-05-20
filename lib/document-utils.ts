@@ -1,6 +1,17 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import matter from "gray-matter";
+import { corpus } from "./generated/corpus";
+
+// Cloudflare Workers (the OpenNext deployment) have no project filesystem at
+// runtime — documents/ cannot be read with fs. There the corpus comes from a
+// build-time bundle (lib/generated/corpus.ts, scripts/build-corpus.mjs). Node
+// deployments (next dev / next start / Vercel) keep reading documents/ off
+// disk so the upload pipeline's in-place edits are visible immediately.
+// navigator.userAgent is the documented Workers runtime probe.
+const ON_WORKERS =
+  typeof navigator !== "undefined" &&
+  navigator.userAgent === "Cloudflare-Workers";
 
 export interface SectionMeta {
   id: string;
@@ -18,15 +29,37 @@ export interface DocumentMeta {
 }
 
 const ROOT = process.cwd();
-const INDEX_PATH = path.join(ROOT, "documents", "index.json");
+const INDEX_REL = "documents/index.json";
+const INDEX_PATH = path.join(ROOT, INDEX_REL);
+
+// Reads a repo-root-relative file (e.g. "documents/foo/doc_001.md"). On
+// Workers it is served from the bundled corpus; on Node it is read off disk.
+export async function readRepoFile(repoRelPath: string): Promise<string> {
+  if (ON_WORKERS) {
+    const content = corpus[repoRelPath];
+    if (content === undefined) {
+      throw new Error(`corpus bundle has no entry for ${repoRelPath}`);
+    }
+    return content;
+  }
+  return fs.readFile(path.join(ROOT, repoRelPath), "utf8");
+}
 
 let indexCache: { mtimeMs: number; data: DocumentMeta[] } | null = null;
+let workerIndexCache: DocumentMeta[] | null = null;
 
-// mtime-keyed cache: the upload pipeline rewrites index.json in-place, and
-// the search/edit/docs routes need to see fresh data even though they run
-// in separate Next.js dev bundles (each with its own module instance).
-// Checking stat is ~50 µs and avoids the explicit invalidation dance.
+// On Workers the corpus is immutable per deploy — parse the bundled index
+// once. On Node an mtime-keyed cache keeps reads fresh: the upload pipeline
+// rewrites index.json in-place, and the search/edit/docs routes need to see
+// new data even across separate Next.js dev bundles. Checking stat is ~50 µs
+// and avoids the explicit invalidation dance.
 export async function loadIndex(): Promise<DocumentMeta[]> {
+  if (ON_WORKERS) {
+    if (!workerIndexCache) {
+      workerIndexCache = JSON.parse(corpus[INDEX_REL]) as DocumentMeta[];
+    }
+    return workerIndexCache;
+  }
   const stat = await fs.stat(INDEX_PATH);
   if (indexCache && indexCache.mtimeMs === stat.mtimeMs) return indexCache.data;
   const raw = await fs.readFile(INDEX_PATH, "utf8");
@@ -79,7 +112,7 @@ export async function loadAllSections(
   const index = await loadIndex();
   const doc = index.find((d) => d.id === docId);
   if (!doc) return null;
-  const raw = await fs.readFile(path.join(ROOT, doc.path), "utf8");
+  const raw = await readRepoFile(doc.path);
   const { content } = matter(raw);
   return { doc, sections: parseAllSections(content) };
 }

@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "document-agent",
+  "main": ".open-next/worker.js",
+  // >= 2024-09-23 is required by OpenNext for the nodejs_compat v2 surface.
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true
+  }
+  // Secrets (GEMINI_API_KEY / AUTH_SECRET / AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET
+  // / GITHUB_TOKEN / MCP_ALLOWED_* etc.) are NOT defined here. Set them with
+  // `wrangler secret put <NAME>` or in the Cloudflare dashboard. For local
+  // `wrangler dev` / `opennextjs-cloudflare preview`, put them in `.dev.vars`.
+}

@@ -1,10 +1,8 @@
 // GET /api/edit/[docId] — returns the current markdown for the doc id, plus
 // the lightweight metadata the editor UI needs to render its header.
 
-import fs from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
-import { loadIndex } from "@/lib/document-utils";
+import { loadIndex, readRepoFile } from "@/lib/document-utils";
 import { gateForRole } from "@/lib/auth-helpers";
 
 export const runtime = "nodejs";
@@ -23,8 +21,7 @@ export async function GET(
   if (!doc) {
     return NextResponse.json({ error: "doc not found" }, { status: 404 });
   }
-  const filePath = path.join(process.cwd(), doc.path);
-  const content = await fs.readFile(filePath, "utf8");
+  const content = await readRepoFile(doc.path);
   return NextResponse.json({
     id: doc.id,
     title: doc.title,

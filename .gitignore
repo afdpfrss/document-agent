@@ -37,6 +37,16 @@ yarn-error.log*
 # vercel
 .vercel
 
+# cloudflare (opennext)
+/.open-next/
+/.wrangler/
+.dev.vars
+cloudflare-env.d.ts
+
+# Build-time corpus bundle — regenerated from documents/ by
+# scripts/build-corpus.mjs (postinstall / cf:build).
+/lib/generated/
+
 # Per-corpus vector index — regenerable from documents/ via
 # scripts/generate-embeddings.mjs, too large to be useful in version control.
 /documents/embeddings.json
