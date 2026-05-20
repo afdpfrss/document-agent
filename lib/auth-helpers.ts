@@ -3,6 +3,8 @@
 // components — the caller decides how to translate the error.
 
 import { auth, type Role } from "@/auth";
+import { productionGuardActive } from "@/lib/config-guard";
+import { audit, ACTOR_ANONYMOUS } from "@/lib/audit-log";
 
 export interface AuthorizedUser {
   email: string;
@@ -18,9 +20,26 @@ export class UnauthenticatedError extends Error {
 }
 
 export class ForbiddenError extends Error {
-  constructor(needed: Role) {
+  // The authenticated user that was rejected — carried so the audit log can
+  // record who attempted a privileged action without the required role.
+  readonly email: string;
+  constructor(needed: Role, email: string) {
     super(`このアクションには「${needed}」ロールが必要です。`);
     this.name = "ForbiddenError";
+    this.email = email;
+  }
+}
+
+// Thrown when auth is disabled but the deployment is a production environment
+// (and the ALLOW_INSECURE_DEPLOY escape hatch is not set). Running unauthen-
+// ticated in production would expose the whole corpus, so the gates below fail
+// closed instead of handing back the synthetic AUTH_DISABLED_USER.
+export class MisconfiguredError extends Error {
+  constructor() {
+    super(
+      "本番環境では認証の設定（AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET）が必須です。サーバー管理者に連絡してください。",
+    );
+    this.name = "MisconfiguredError";
   }
 }
 
@@ -42,8 +61,15 @@ const AUTH_DISABLED_USER: AuthorizedUser = {
   name: "Local Dev (auth disabled)",
 };
 
+// In production, refuse the auth-disabled bypass — running open is treated as
+// a misconfiguration, not a valid mode. dev / staging keep the synthetic user.
+function authDisabledUserOrThrow(): AuthorizedUser {
+  if (productionGuardActive()) throw new MisconfiguredError();
+  return AUTH_DISABLED_USER;
+}
+
 export async function requireUser(): Promise<AuthorizedUser> {
-  if (!isAuthEnabled()) return AUTH_DISABLED_USER;
+  if (!isAuthEnabled()) return authDisabledUserOrThrow();
   const session = await auth();
   if (!session?.user?.email) throw new UnauthenticatedError();
   return {
@@ -54,10 +80,17 @@ export async function requireUser(): Promise<AuthorizedUser> {
 }
 
 export async function requireRole(role: Role): Promise<AuthorizedUser> {
-  if (!isAuthEnabled()) return AUTH_DISABLED_USER;
+  if (!isAuthEnabled()) return authDisabledUserOrThrow();
   const user = await requireUser();
-  if (user.role !== role) throw new ForbiddenError(role);
+  if (user.role !== role) throw new ForbiddenError(role, user.email);
   return user;
+}
+
+function errorResponse(message: string, status: number): Response {
+  return new Response(JSON.stringify({ error: message }), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 // Convenience for route handlers: maps the auth exceptions to NextResponse
@@ -66,28 +99,38 @@ export async function requireRole(role: Role): Promise<AuthorizedUser> {
 export async function gateForRole(
   role: Role,
 ): Promise<{ user: AuthorizedUser; response: null } | { user: null; response: Response }> {
-  if (!isAuthEnabled()) return { user: AUTH_DISABLED_USER, response: null };
+  if (!isAuthEnabled()) {
+    if (productionGuardActive()) {
+      return { user: null, response: errorResponse(new MisconfiguredError().message, 503) };
+    }
+    return { user: AUTH_DISABLED_USER, response: null };
+  }
   try {
     const user = await requireRole(role);
     return { user, response: null };
   } catch (e) {
     if (e instanceof UnauthenticatedError) {
-      return {
-        user: null,
-        response: new Response(JSON.stringify({ error: e.message }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        }),
-      };
+      audit({
+        event: "auth.denied",
+        actor: ACTOR_ANONYMOUS,
+        source: "web",
+        outcome: "denied",
+        detail: { role, reason: "unauthenticated" },
+      });
+      return { user: null, response: errorResponse(e.message, 401) };
     }
     if (e instanceof ForbiddenError) {
-      return {
-        user: null,
-        response: new Response(JSON.stringify({ error: e.message }), {
-          status: 403,
-          headers: { "Content-Type": "application/json" },
-        }),
-      };
+      audit({
+        event: "auth.denied",
+        actor: e.email,
+        source: "web",
+        outcome: "denied",
+        detail: { role, reason: "forbidden" },
+      });
+      return { user: null, response: errorResponse(e.message, 403) };
+    }
+    if (e instanceof MisconfiguredError) {
+      return { user: null, response: errorResponse(e.message, 503) };
     }
     throw e;
   }

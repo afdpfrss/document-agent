@@ -4,8 +4,14 @@ import {
   type ChatTurn,
   type SearchEvent,
 } from "@/lib/gemini-search";
-import { requireUser, UnauthenticatedError } from "@/lib/auth-helpers";
+import {
+  requireUser,
+  MisconfiguredError,
+  UnauthenticatedError,
+  type AuthorizedUser,
+} from "@/lib/auth-helpers";
 import { friendlyLlmError } from "@/lib/llm-errors";
+import { audit, ACTOR_ANONYMOUS } from "@/lib/audit-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -37,11 +43,22 @@ function friendlyError(message: string): string {
 export async function POST(req: Request) {
   // Any authenticated user (一般 or 編集) can search — only edit actions
   // require the elevated role.
+  let user: AuthorizedUser;
   try {
-    await requireUser();
+    user = await requireUser();
   } catch (e) {
     if (e instanceof UnauthenticatedError) {
+      audit({
+        event: "auth.denied",
+        actor: ACTOR_ANONYMOUS,
+        source: "web",
+        outcome: "denied",
+        detail: { route: "/api/search", reason: "unauthenticated" },
+      });
       return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    if (e instanceof MisconfiguredError) {
+      return NextResponse.json({ error: e.message }, { status: 503 });
     }
     throw e;
   }
@@ -64,6 +81,16 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
+
+  // Audit metadata only — never the query text itself (privacy: the audit
+  // stream must not become a second copy of what users searched for).
+  audit({
+    event: "search",
+    actor: user.email,
+    source: "web",
+    outcome: "ok",
+    detail: { questionLength: question.length, historyLength: history.length },
+  });
 
   if (!process.env.GEMINI_API_KEY) {
     return NextResponse.json(

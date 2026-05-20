@@ -17,6 +17,8 @@ import {
   proposeEdit,
   proposeEditMulti,
 } from "@/lib/github";
+import { productionGuardActive } from "@/lib/config-guard";
+import { audit } from "@/lib/audit-log";
 
 const ROOT = process.cwd();
 
@@ -68,6 +70,11 @@ function proposerLabel(proposer: string): string {
 // 承認を許す。緩和されるのは SoD のみ — corpus CI と CODEOWNERS 承認は通常どおり
 // 必須なので、デモ編集も壊れた文書ではなく、承認は GitHub 差分 UI を通る。
 export function isDemoMode(): boolean {
+  // デモモードは SoD（提案者≠承認者）チェックを無効化するため、本番では
+  // 絶対に有効化させない。productionGuardActive() が本番では強制的に false に
+  // する（エスケープハッチ: ALLOW_INSECURE_DEPLOY）。MCP_DEMO_MODE の消し忘れ
+  // による事故を防ぐ。
+  if (productionGuardActive()) return false;
   return process.env.MCP_DEMO_MODE === "true";
 }
 
@@ -238,6 +245,18 @@ export async function proposeDocumentEdit(
     // ignore — labelling is a UI nicety; the body markers are authoritative.
   }
 
+  audit({
+    event: "pr.created",
+    actor: proposer,
+    source: "mcp",
+    outcome: "ok",
+    detail: {
+      docIds: [doc.id],
+      prNumber: result.prNumber,
+      editCount: edits.length,
+    },
+  });
+
   return {
     ok: true,
     doc_id: doc.id,
@@ -381,6 +400,18 @@ export async function proposeRelatedEdit(
   } catch {
     // ignore — labelling is a UI nicety; the body markers are authoritative.
   }
+
+  audit({
+    event: "pr.created",
+    actor: proposer,
+    source: "mcp",
+    outcome: "ok",
+    detail: {
+      docIds: outcomes.map((o) => o.docId),
+      prNumber: result.prNumber,
+      editCount: totalEdits,
+    },
+  });
 
   return {
     ok: true,

@@ -19,12 +19,15 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { createMcpServer } from "@/lib/mcp/server";
 import {
+  hasMcpAllowlist,
   isAllowedMcpUser,
   isMcpAuthEnabled,
   mcpResourceUrl,
   protectedResourceMetadataUrl,
   verifyAccessToken,
 } from "@/lib/mcp/oauth";
+import { productionGuardActive } from "@/lib/config-guard";
+import { audit, ACTOR_ANONYMOUS } from "@/lib/audit-log";
 
 // Node runtime: the search tools read documents/ off the filesystem via
 // node:fs (see lib/document-utils.ts), and the OAuth layer uses node:crypto.
@@ -75,28 +78,81 @@ function unauthorized(req: Request, description: string): Response {
   );
 }
 
+// 503 for a misconfigured production deployment — distinct from 401 (which
+// means "authenticate"), this means "the server refuses to serve until an
+// operator fixes the configuration".
+function serviceUnavailable(description: string): Response {
+  return withCors(
+    new Response(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: { code: -32002, message: description },
+        id: null,
+      }),
+      { status: 503, headers: { "Content-Type": "application/json" } },
+    ),
+  );
+}
+
 export function OPTIONS(): Response {
   return new Response(null, { status: 204, headers: CORS });
 }
 
 async function handleMcp(req: Request): Promise<Response> {
+  // Production guard: the MCP connector exposes the whole corpus to whoever
+  // holds the URL. In production it must sit behind OAuth AND an internal-user
+  // allowlist — fail closed otherwise. Escape hatch: ALLOW_INSECURE_DEPLOY.
+  if (productionGuardActive()) {
+    if (!isMcpAuthEnabled()) {
+      return serviceUnavailable(
+        "本番環境では MCP コネクタに認証が必須です（AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET を設定してください）。",
+      );
+    }
+    if (!hasMcpAllowlist()) {
+      return serviceUnavailable(
+        "本番環境では MCP コネクタに allowlist が必須です（MCP_ALLOWED_EMAILS または MCP_ALLOWED_EMAIL_DOMAINS を設定してください）。",
+      );
+    }
+  }
+
   let authInfo: AuthInfo | undefined;
 
   if (isMcpAuthEnabled()) {
     const header = (req.headers.get("authorization") ?? "").trim();
     const match = /^Bearer\s+(.+)$/i.exec(header);
     if (!match) {
+      audit({
+        event: "mcp.auth.denied",
+        actor: ACTOR_ANONYMOUS,
+        source: "mcp",
+        outcome: "denied",
+        detail: { reason: "missing_bearer" },
+      });
       return unauthorized(req, "Authentication required.");
     }
     const token = match[1];
     const claims = verifyAccessToken(token);
     if (!claims) {
+      audit({
+        event: "mcp.auth.denied",
+        actor: ACTOR_ANONYMOUS,
+        source: "mcp",
+        outcome: "denied",
+        detail: { reason: "invalid_token" },
+      });
       return unauthorized(req, "Invalid or expired access token.");
     }
     const email = typeof claims.sub === "string" ? claims.sub : "";
     // Re-check the allowlist on every call so removing an email takes effect
     // without waiting for the token to expire.
     if (!isAllowedMcpUser(email)) {
+      audit({
+        event: "mcp.auth.denied",
+        actor: email || ACTOR_ANONYMOUS,
+        source: "mcp",
+        outcome: "denied",
+        detail: { reason: "not_allowed" },
+      });
       return unauthorized(req, "User is not allowed to use this connector.");
     }
     const expectedAud = mcpResourceUrl(req);
@@ -107,6 +163,13 @@ async function handleMcp(req: Request): Promise<Response> {
       typeof claims.aud !== "string" ||
       normalizeUrl(claims.aud) !== normalizeUrl(expectedAud)
     ) {
+      audit({
+        event: "mcp.auth.denied",
+        actor: email || ACTOR_ANONYMOUS,
+        source: "mcp",
+        outcome: "denied",
+        detail: { reason: "audience_mismatch" },
+      });
       return unauthorized(req, "Access token audience mismatch.");
     }
     authInfo = {
@@ -122,6 +185,7 @@ async function handleMcp(req: Request): Promise<Response> {
         name: typeof claims.name === "string" ? claims.name : email,
       },
     };
+    audit({ event: "mcp.auth.ok", actor: email, source: "mcp", outcome: "ok" });
   }
 
   // Stateless: a fresh server + transport per request. The Streamable HTTP

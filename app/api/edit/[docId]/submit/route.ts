@@ -10,6 +10,7 @@ import { NextResponse } from "next/server";
 import { loadIndex } from "@/lib/document-utils";
 import { isGithubConfigured, proposeEdit } from "@/lib/github";
 import { gateForRole } from "@/lib/auth-helpers";
+import { audit } from "@/lib/audit-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -65,6 +66,13 @@ export async function POST(
       prBody:
         body.prBody ??
         `Edit proposed via chat-edit UI for \`${doc.path}\` (${docId} — ${doc.title}).`,
+    });
+    audit({
+      event: "pr.created",
+      actor: gate.user.email,
+      source: "web",
+      outcome: "ok",
+      detail: { docIds: [docId], prNumber: result.prNumber },
     });
     return NextResponse.json(result);
   } catch (err) {

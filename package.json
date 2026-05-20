@@ -2,6 +2,7 @@
   "name": "document-agent",
   "version": "0.1.0",
   "private": true,
+  "license": "UNLICENSED",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -10,6 +11,7 @@
     "propose-edit": "node scripts/propose-edit.mjs",
     "validate:corpus": "node scripts/validate-corpus.mjs",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "check:sod": "node scripts/check-separation-of-duties.mjs"
   },
   "dependencies": {
@@ -37,6 +39,7 @@
     "tailwindcss": "^4",
     "turndown": "^7.2.4",
     "typescript": "^5",
+    "vitest": "^4.1.6",
     "xlsx": "^0.18.5"
   }
 }
