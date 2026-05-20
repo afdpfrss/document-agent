@@ -42,7 +42,7 @@ export function parseProposerMarker(
 // <!-- poka-yoke:proposer=... --> や <!-- poka-yoke:demo --> を仕込み、末尾の
 // 正規マーカーより前方に偽マーカーを出して提案者詐称・SoD 回避ができてしまう
 // （parseProposerMarker / DEMO_MARKER_RE は最初の一致を採用するため）。
-function sanitizeForPrBody(text: string): string {
+export function sanitizeForPrBody(text: string): string {
   return text.replace(/<!--/g, "<! --").replace(/-->/g, "-- >");
 }
 
@@ -81,9 +81,12 @@ interface PrDecoration {
   labels: string[];
 }
 
-// PR のタイトル接頭辞・本文末尾マーカー・ラベルを組み立てる。propose_edit と
-// propose_related_edit が共用する。
-function prDecoration(rawSummary: string, proposer: string): PrDecoration {
+// PR のタイトル接頭辞・本文末尾マーカー・ラベルを組み立てる。propose_edit /
+// propose_related_edit / ingest_documents が共用する。
+export function prDecoration(
+  rawSummary: string,
+  proposer: string,
+): PrDecoration {
   const demo = isDemoMode();
   const markerLines = [buildProposerMarker(proposerMarkerValue(proposer))];
   const labels = [proposerLabel(proposer)];
