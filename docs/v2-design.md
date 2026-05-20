@@ -130,7 +130,7 @@
 - **段階的開示の維持**: サーバはクエリ時に回答生成 LLM を呼ばない。各ツールが返す情報量を絞る（フロントマター → セクション本文）ことで §3 の段階的開示構造をツール境界上で保つ。
 - **ベクトル検索**: クエリ埋め込みのみ Gemini を使用。`GEMINI_API_KEY` 未設定時はメタデータ駆動のみへ自動フォールバック（既存 `lib/hybrid-search.ts` の挙動を流用）。
 - **疎結合**: ツール実装（`lib/mcp/`）は既存の `lib/` モジュール（`document-utils` / `hybrid-search` / `edit-schema` / `github`）を import するだけにとどめ、既存の Gemini チャットパイプラインと共存させる。
-- **認証**: Phase 2 で OAuth 2.1（既存 `auth.ts` の Google OIDC を土台）により保護する。認証導入まで公開デプロイしない（社内機密文書が URL を知る全員に露出するため）。
+- **認証（OAuth 2.1）**: `/api/mcp` は OAuth 2.1 のリソースサーバとして保護されると同時に、最小限の認可サーバも兼ねる。クライアント（claude.ai のカスタムコネクタ等）は動的クライアント登録 → authorization code + PKCE(S256) フローでトークンを取得する。実ユーザー認証は既存 `auth.ts`（NextAuth + Google OIDC）に委譲し、社内ユーザーのみを allowlist（`MCP_ALLOWED_EMAIL_DOMAINS` / `MCP_ALLOWED_EMAILS`）で許可する。アクセストークン・リフレッシュトークン・認可コード・client_id はすべて `AUTH_SECRET` で署名した HS256 JWT で表現し、DB を使わない（§10 整合。認可コードの単回使用のみプロセス内メモリでベストエフォート保証）。エンドポイント: `/.well-known/oauth-protected-resource`・`/.well-known/oauth-authorization-server`・`/api/mcp/oauth/{register,authorize,token}`。アプリ全体の認証が OFF の開発時はトークン不要（Phase 1 と同じ挙動）。認証が有効になるまで公開デプロイしない。
 
 ---
 

@@ -19,6 +19,14 @@ export default auth((req) => {
   // sign-in becomes a redirect loop. Same for static assets.
   if (pathname.startsWith("/api/auth")) return;
 
+  // MCP connector endpoints self-gate with OAuth bearer tokens, not browser
+  // sessions: /api/mcp returns a 401 + WWW-Authenticate (never an HTML
+  // redirect), and the OAuth discovery / authorize / token / register
+  // endpoints must be reachable unauthenticated. The authorize endpoint runs
+  // its own NextAuth session check internally.
+  if (pathname.startsWith("/api/mcp")) return;
+  if (pathname.startsWith("/.well-known/")) return;
+
   if (!req.auth) {
     const signIn = new URL("/api/auth/signin", req.nextUrl.origin);
     signIn.searchParams.set("callbackUrl", pathname + req.nextUrl.search);
