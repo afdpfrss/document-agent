@@ -37,6 +37,12 @@ describe("productionGuardActive", () => {
     vi.stubEnv("NODE_ENV", "development");
     expect(productionGuardActive()).toBe(false);
   });
+
+  it("is inactive during the Next.js build phase (static prerender)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PHASE", "phase-production-build");
+    expect(productionGuardActive()).toBe(false);
+  });
 });
 
 describe("productionConfigIssues", () => {

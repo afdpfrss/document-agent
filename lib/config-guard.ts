@@ -22,11 +22,20 @@ export function insecureDeployAllowed(): boolean {
   return process.env.ALLOW_INSECURE_DEPLOY === "true";
 }
 
+// `next build` runs with NODE_ENV=production and statically prerenders server
+// components — with no real request and no runtime env. The fail-closed guard
+// must not trip during the build itself, or the build fails. NEXT_PHASE marks
+// the build / export phases; runtime (`next start`) uses a different value.
+function isBuildPhase(): boolean {
+  const phase = process.env.NEXT_PHASE;
+  return phase === "phase-production-build" || phase === "phase-export";
+}
+
 // True when production fail-closed behaviour should apply. When this is true a
 // route handler must deny the dangerous-by-default code paths instead of
 // silently serving them.
 export function productionGuardActive(): boolean {
-  return isProduction() && !insecureDeployAllowed();
+  return isProduction() && !isBuildPhase() && !insecureDeployAllowed();
 }
 
 function authConfigured(): boolean {
@@ -44,7 +53,7 @@ function mcpAllowlistConfigured(): boolean {
 // Empty when the configuration is safe (or not in production). instrumentation.ts
 // logs these at server startup; SECURITY.md documents each one.
 export function productionConfigIssues(): string[] {
-  if (!isProduction()) return [];
+  if (!isProduction() || isBuildPhase()) return [];
   const issues: string[] = [];
 
   if (!authConfigured()) {
