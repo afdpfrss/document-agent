@@ -8,7 +8,12 @@
 // deliberately narrow slice of the corpus so the staged-disclosure structure
 // (docs/v2-design.md §2, §3) is preserved on the tool boundary.
 
-import { loadIndex, loadSections, type DocumentMeta } from "@/lib/document-utils";
+import {
+  loadAllSections,
+  loadIndex,
+  loadSections,
+  type DocumentMeta,
+} from "@/lib/document-utils";
 import { vectorSearch } from "@/lib/hybrid-search";
 
 export interface DocCandidate {
@@ -190,5 +195,70 @@ export async function listCategories(): Promise<ListCategoriesResult> {
     total_documents: index.length,
     category_count: categories.length,
     categories,
+  };
+}
+
+// --- 横展開の発見ツール（find_text_occurrences の裏側） --------------------
+
+export interface TextOccurrence {
+  doc_id: string;
+  title: string;
+  category: string;
+  total: number;
+  sections: { id: string; title: string; count: number }[];
+}
+
+export interface FindTextResult {
+  query: string;
+  total_occurrences: number;
+  document_count: number;
+  documents: TextOccurrence[];
+  note: string;
+}
+
+// 指定した文字列が逐語で出現する全文書・全セクションを列挙する。横展開編集の
+// 前に影響範囲（どこに同じ記述があるか）を全件把握し、関連資料の直し忘れを
+// 防ぐためのポカヨケ。
+export async function findTextOccurrences(
+  text: string,
+): Promise<FindTextResult> {
+  const index = await loadIndex();
+  const documents: TextOccurrence[] = [];
+  let grandTotal = 0;
+
+  for (const meta of index) {
+    const data = await loadAllSections(meta.id);
+    if (!data) continue;
+    const sections: { id: string; title: string; count: number }[] = [];
+    let docTotal = 0;
+    for (const s of data.sections) {
+      // split による非重複カウント（text は逐語文字列）。
+      const count = s.body.split(text).length - 1;
+      if (count > 0) {
+        sections.push({ id: s.id, title: s.title, count });
+        docTotal += count;
+      }
+    }
+    if (docTotal > 0) {
+      documents.push({
+        doc_id: meta.id,
+        title: meta.title,
+        category: meta.category,
+        total: docTotal,
+        sections,
+      });
+      grandTotal += docTotal;
+    }
+  }
+
+  return {
+    query: text,
+    total_occurrences: grandTotal,
+    document_count: documents.length,
+    documents,
+    note:
+      documents.length === 0
+        ? "この文字列はどの文書本文にも逐語では存在しません。"
+        : "横展開編集の前に、ここに挙がった全箇所を確認すること。propose_related_edit で複数文書を1つの PR にまとめて修正できます。",
   };
 }
