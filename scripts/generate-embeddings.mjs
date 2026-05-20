@@ -9,7 +9,6 @@ const ROOT = path.resolve(__dirname, "..");
 const INDEX_PATH = path.join(ROOT, "documents", "index.json");
 const OUT_PATH = path.join(ROOT, "documents", "embeddings.json");
 
-const MODEL = "gemini-embedding-001";
 const BATCH = 5;
 const DELAY_MS = 13000;
 const MAX_BODY_CHARS = 2000;
@@ -68,6 +67,11 @@ function parseSections(markdown) {
 
 async function main() {
   await loadEnvLocal();
+  // 埋め込みモデル名は環境変数で抽象化する（v2 設計 §2 / §7 — Gemini→さくら
+  // 等への切替余地を残す）。クエリ側 (lib/hybrid-search.ts) は
+  // embeddings.json に記録された model を使うため、ここで使った値が
+  // そのまま検索時のクエリ埋め込みにも使われ、両者は常に一致する。
+  const MODEL = process.env.LLM_EMBEDDING_MODEL || "gemini-embedding-001";
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.error("GEMINI_API_KEY is not set. Add it to .env.local.");

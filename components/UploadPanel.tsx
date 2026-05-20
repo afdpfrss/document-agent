@@ -168,12 +168,12 @@ export function UploadPanel() {
   }
 
   function removePreview(tempId: string) {
-    setPreviews((prev) => prev.filter((p) => p.tempId !== tempId));
-    setActiveTab((cur) => {
-      if (cur !== tempId) return cur;
-      const next = previews.find((p) => p.tempId !== tempId);
-      return next?.tempId ?? null;
-    });
+    // Compute the remaining list once so setPreviews and setActiveTab agree.
+    // The old setActiveTab updater closed over the stale `previews` array,
+    // which could leave activeTab pointing at an already-removed preview.
+    const remaining = previews.filter((p) => p.tempId !== tempId);
+    setPreviews(remaining);
+    setActiveTab((cur) => (cur === tempId ? remaining[0]?.tempId ?? null : cur));
   }
 
   async function submit() {

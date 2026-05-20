@@ -132,49 +132,57 @@ export function ChatWindow() {
       let content = "";
       let firstDelta = true;
 
+      const handleLine = (raw: string) => {
+        const line = raw.trim();
+        if (!line) return;
+        let ev: {
+          type: "sources" | "delta" | "intermission" | "done" | "error";
+          sources?: SearchSource[];
+          text?: string;
+          error?: string;
+        };
+        try {
+          ev = JSON.parse(line);
+        } catch {
+          return;
+        }
+        if (ev.type === "sources") {
+          updateAssistant({ sources: ev.sources ?? [] });
+        } else if (ev.type === "delta") {
+          content += ev.text ?? "";
+          if (firstDelta) {
+            firstDelta = false;
+            setLoading(false);
+          }
+          updateAssistant({ content, intermission: false });
+        } else if (ev.type === "intermission") {
+          updateAssistant({ intermission: true });
+        } else if (ev.type === "done") {
+          updateAssistant({ streaming: false, intermission: false });
+        } else if (ev.type === "error") {
+          updateAssistant({
+            content: ev.error ?? "エラーが発生しました。",
+            error: true,
+            streaming: false,
+            intermission: false,
+          });
+        }
+      };
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         let nl: number;
         while ((nl = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, nl).trim();
+          handleLine(buffer.slice(0, nl));
           buffer = buffer.slice(nl + 1);
-          if (!line) continue;
-          let ev: {
-            type: "sources" | "delta" | "intermission" | "done" | "error";
-            sources?: SearchSource[];
-            text?: string;
-            error?: string;
-          };
-          try {
-            ev = JSON.parse(line);
-          } catch {
-            continue;
-          }
-          if (ev.type === "sources") {
-            updateAssistant({ sources: ev.sources ?? [] });
-          } else if (ev.type === "delta") {
-            content += ev.text ?? "";
-            if (firstDelta) {
-              firstDelta = false;
-              setLoading(false);
-            }
-            updateAssistant({ content, intermission: false });
-          } else if (ev.type === "intermission") {
-            updateAssistant({ intermission: true });
-          } else if (ev.type === "done") {
-            updateAssistant({ streaming: false, intermission: false });
-          } else if (ev.type === "error") {
-            updateAssistant({
-              content: ev.error ?? "エラーが発生しました。",
-              error: true,
-              streaming: false,
-              intermission: false,
-            });
-          }
         }
       }
+      // Flush any trailing line not terminated by "\n" (e.g. a proxy stripped
+      // the final newline) — otherwise a last done/error event would be lost.
+      buffer += decoder.decode();
+      handleLine(buffer);
       updateAssistant({ streaming: false, intermission: false });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "通信エラーが発生しました。";

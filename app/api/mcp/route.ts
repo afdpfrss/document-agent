@@ -100,8 +100,11 @@ async function handleMcp(req: Request): Promise<Response> {
       return unauthorized(req, "User is not allowed to use this connector.");
     }
     const expectedAud = mcpResourceUrl(req);
+    // Require a string `aud` that matches this resource. issueAccessToken
+    // always sets one, so an absent/non-string audience means a malformed or
+    // foreign token — reject it rather than letting it through unchecked.
     if (
-      typeof claims.aud === "string" &&
+      typeof claims.aud !== "string" ||
       normalizeUrl(claims.aud) !== normalizeUrl(expectedAud)
     ) {
       return unauthorized(req, "Access token audience mismatch.");

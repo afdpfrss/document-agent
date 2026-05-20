@@ -12,7 +12,11 @@ name: separation-of-duties
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened]
+    # labeled / unlabeled も拾う: demo ラベルの付け外しで SoD の適用有無が
+    # 変わるため、再評価しないと古い status が残ってしまう。
+    # ready_for_review: draft → ready 化でも再評価する。
+    types:
+      [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
   pull_request_review:
     types: [submitted, dismissed, edited]
 

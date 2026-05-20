@@ -18,9 +18,10 @@ interface Props {
 
 export function DocViewer({ doc, sections, canEdit = false }: Props) {
   // Browsers normally honor #anchor on navigation, but when the target page is
-  // a Next.js client-rendered route opened via target="_blank", the hash can
-  // be processed before the section element exists. Re-trigger the scroll on
-  // mount and highlight the target briefly so the user sees where they landed.
+  // a Next.js client-rendered route the hash can be processed before the
+  // section element exists. Re-trigger the scroll + brief highlight so the user
+  // sees where they landed. Keyed on doc.id so it also re-runs on in-app
+  // navigation between two /docs/[id] routes (which reuse this component).
   useEffect(() => {
     const hash = window.location.hash.slice(1);
     if (!hash) return;
@@ -30,7 +31,7 @@ export function DocViewer({ doc, sections, canEdit = false }: Props) {
     el.classList.add("doc-section-highlight");
     const t = setTimeout(() => el.classList.remove("doc-section-highlight"), 1800);
     return () => clearTimeout(t);
-  }, []);
+  }, [doc.id]);
 
   return (
     <article className="max-w-3xl mx-auto px-4 sm:px-6 py-8">

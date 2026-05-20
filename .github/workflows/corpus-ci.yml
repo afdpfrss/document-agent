@@ -7,6 +7,14 @@ name: corpus-ci
 on:
   pull_request:
     branches: [main]
+  # main への push 後も検証する。base が古いまま並行マージされた 2 つの PR が
+  # それぞれ単独では緑でも、マージ後の main で index.json↔ファイルの不整合を
+  # 生むことがある。post-merge で走らせて即座にドリフトを検知する。
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   validate:

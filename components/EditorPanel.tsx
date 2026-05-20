@@ -16,7 +16,11 @@
 
 import { useState } from "react";
 import dynamic from "next/dynamic";
-import type { FindReplaceEdit, EditApplyStatus } from "@/lib/edit-schema";
+import {
+  applyEdits,
+  type FindReplaceEdit,
+  type EditApplyStatus,
+} from "@/lib/edit-schema";
 
 // Monaco needs the DOM — must be ssr:false. We import the DiffEditor
 // specifically (not the whole module) to keep the client bundle smaller.
@@ -91,13 +95,25 @@ export function EditorPanel(props: Props) {
   }
 
   function applyOkEdits() {
-    // Re-apply on the client so the user can see exactly what would change
-    // (server already did this dry-run to compute statuses).
-    let content = working;
-    for (const c of cards) {
-      if (c.status.kind !== "ok") continue;
-      content = content.replace(c.edit.find, c.edit.replace);
+    // Re-apply with the shared applyEdits so the client matches the server's
+    // semantics exactly. The stored statuses were computed at propose time;
+    // the user may have hand-edited the diff since, so re-run the dry-run
+    // against the CURRENT working copy and refuse to apply if anything no
+    // longer matches uniquely — applying a stale edit would silently corrupt
+    // the document headed into the PR.
+    const okEdits = cards
+      .filter((c) => c.status.kind === "ok")
+      .map((c) => c.edit);
+    if (okEdits.length === 0) return;
+    const { content, statuses } = applyEdits(working, okEdits);
+    const stale = statuses.filter((s) => s.kind !== "ok").length;
+    if (stale > 0) {
+      setError(
+        `${stale} 件の提案が現在の本文に一致しなくなったため適用を中止しました（手動編集などで原文が変わった可能性があります）。AI に再依頼してください。`,
+      );
+      return;
     }
+    setError(null);
     setWorking(content);
   }
 
@@ -274,15 +290,18 @@ function ProposalCardView({ card }: { card: ProposalCard }) {
 }
 
 function formatPrBody(cards: ProposalCard[]): string {
-  const applied = cards.filter((c) => c.status.kind === "ok");
+  // These are the AI proposals — the reviewer may have hand-adjusted the diff
+  // afterwards, so this is reference context, not a record of the final diff.
+  const proposed = cards.filter((c) => c.status.kind === "ok");
   const lines = [
     "Chat-edit UI で生成・レビューされた編集です。",
+    "最終的な変更内容は GitHub の diff で確認してください（提案後に手動調整された可能性があります）。",
     "",
-    `適用された AI 提案: ${applied.length} 件`,
+    `AI 提案（参考）: ${proposed.length} 件`,
     "",
-    ...applied.map(
+    ...proposed.map(
       (c, i) =>
-        `### 編集 ${i + 1}\n**理由:** ${c.edit.reason}\n\n\`\`\`\n- ${c.edit.find}\n+ ${c.edit.replace}\n\`\`\``,
+        `### 提案 ${i + 1}\n**理由:** ${c.edit.reason}\n\n\`\`\`\n- ${c.edit.find}\n+ ${c.edit.replace}\n\`\`\``,
     ),
   ];
   return lines.join("\n");
