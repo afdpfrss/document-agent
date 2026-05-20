@@ -23,6 +23,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const AUTHORS_PATH = path.join(ROOT, ".github", "edit-authors.json");
 const STATUS_CONTEXT = "poka-yoke / separation-of-duties";
 const PROPOSER_MARKER_RE = /<!--\s*poka-yoke:proposer=(\S+?)\s*-->/;
+const DEMO_MARKER_RE = /<!--\s*poka-yoke:demo\s*-->/;
 const DEMO_LABEL = "demo";
 const API = "https://api.github.com";
 
@@ -74,10 +75,13 @@ async function main() {
     typeof l === "string" ? l : l.name,
   );
 
-  // デモモード: demo ラベル付き PR は SoD 非適用（プレゼン用、main 上で
-  // 同一アカウントの作成〜承認を許す）。緩和されるのは SoD のみで、
+  // デモモード: demo ラベル または本文のデモマーカーがあれば SoD 非適用
+  // （プレゼン用、main 上で同一アカウントの作成〜承認を許す）。ラベルは
+  // ベストエフォートなので本文マーカーも見る。緩和されるのは SoD のみで、
   // corpus CI と CODEOWNERS 承認は通常どおり必須。
-  if (labels.includes(DEMO_LABEL)) {
+  const isDemo =
+    labels.includes(DEMO_LABEL) || DEMO_MARKER_RE.test(pr.body ?? "");
+  if (isDemo) {
     await postStatus("success", "demo mode — SoD 非適用");
     return;
   }

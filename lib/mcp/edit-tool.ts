@@ -53,6 +53,42 @@ function proposerLabel(proposer: string): string {
   return `proposer:${slug}`;
 }
 
+// デモモード（プレゼン用）。MCP_DEMO_MODE=true のとき、PR にデモ印（タイトル
+// 接頭辞・本文マーカー・demo ラベル）を付ける。separation-of-duties ワークフロー
+// はこの印を見て提案者≠承認者チェックを非適用にし、同一アカウントでの作成〜
+// 承認を許す。緩和されるのは SoD のみ — corpus CI と CODEOWNERS 承認は通常どおり
+// 必須なので、デモ編集も壊れた文書ではなく、承認は GitHub 差分 UI を通る。
+export function isDemoMode(): boolean {
+  return process.env.MCP_DEMO_MODE === "true";
+}
+
+const DEMO_MARKER = "<!-- poka-yoke:demo -->";
+const DEMO_LABEL = "demo";
+const DEMO_TITLE_PREFIX = "[DEMO] ";
+
+interface PrDecoration {
+  title: string;
+  markerLines: string[];
+  labels: string[];
+}
+
+// PR のタイトル接頭辞・本文末尾マーカー・ラベルを組み立てる。propose_edit と
+// propose_related_edit が共用する。
+function prDecoration(rawSummary: string, proposer: string): PrDecoration {
+  const demo = isDemoMode();
+  const markerLines = [buildProposerMarker(proposerMarkerValue(proposer))];
+  const labels = [proposerLabel(proposer)];
+  if (demo) {
+    markerLines.push(DEMO_MARKER);
+    labels.push(DEMO_LABEL);
+  }
+  return {
+    title: demo ? `${DEMO_TITLE_PREFIX}${rawSummary}` : rawSummary,
+    markerLines,
+    labels,
+  };
+}
+
 interface EditFailure {
   index: number;
   problem: "not_found" | "ambiguous";
@@ -157,6 +193,7 @@ export async function proposeDocumentEdit(
   }
 
   const { doc } = outcome;
+  const deco = prDecoration(summary, proposer);
   const prBody = [
     `MCP コネクタ経由の編集提案です。`,
     `提案者: ${proposer}`,
@@ -171,22 +208,22 @@ export async function proposeDocumentEdit(
     `---`,
     `この PR は人間レビュー前提です。差分を確認のうえマージしてください（自動マージなし / v2 設計 §10）。`,
     "",
-    buildProposerMarker(proposerMarkerValue(proposer)),
+    ...deco.markerLines,
   ].join("\n");
 
   const result = await proposeEdit({
     path: doc.path,
     content: outcome.content,
-    message: summary,
+    message: deco.title,
     prBody,
   });
 
-  // 提案者ラベルはベストエフォート — SoD の正本は本文の提案者マーカー。
+  // ラベルはベストエフォート — SoD の正本は本文のマーカー（提案者・デモ印）。
   // ラベル付けに失敗しても PR 作成自体は成功しているので握りつぶす。
   try {
-    await addPullRequestLabels(result.prNumber, [proposerLabel(proposer)]);
+    await addPullRequestLabels(result.prNumber, deco.labels);
   } catch {
-    // ignore — labelling is a UI nicety; the body marker is authoritative.
+    // ignore — labelling is a UI nicety; the body markers are authoritative.
   }
 
   return {
@@ -291,6 +328,7 @@ export async function proposeRelatedEdit(
   }
 
   const totalEdits = changes.reduce((n, c) => n + c.edits.length, 0);
+  const deco = prDecoration(summary, proposer);
   const prBody = [
     `MCP コネクタ経由の横展開編集提案です（関連する複数文書をまとめて修正）。`,
     `提案者: ${proposer}`,
@@ -311,19 +349,19 @@ export async function proposeRelatedEdit(
     `---`,
     `この PR は人間レビュー前提です。関連文書をまとめて変更しているため、影響する各カテゴリの CODEOWNERS による確認が必要です（自動マージなし / v2 設計 §10）。`,
     "",
-    buildProposerMarker(proposerMarkerValue(proposer)),
+    ...deco.markerLines,
   ].join("\n");
 
   const result = await proposeEditMulti({
     files: changedFiles,
-    message: summary,
+    message: deco.title,
     prBody,
   });
 
   try {
-    await addPullRequestLabels(result.prNumber, [proposerLabel(proposer)]);
+    await addPullRequestLabels(result.prNumber, deco.labels);
   } catch {
-    // ignore — labelling is a UI nicety; the body marker is authoritative.
+    // ignore — labelling is a UI nicety; the body markers are authoritative.
   }
 
   return {
