@@ -20,3 +20,4 @@ This repository is transitioning from **v1 (legacy)** to **v2 (hybrid document a
 - LLM はモデル名・API キーを環境変数化（さくら等への将来切替余地を残す）
 - 開発フェーズはダミーデータ前提、Gemini 無料枠を使う
 - ベクトル DB / DB 永続化 / 全文再生成型編集は採用しない（理由は §10）
+- 開発・動作確認は `MCP_DEMO_MODE=true`（デモモード）前提。デモ PR は `[DEMO]` 付きで SoD（提案者≠承認者）が非適用になり、同一アカウントで作成〜承認〜マージできる。corpus CI（文書整合性）と型チェックはデモモードでも有効。詳細は `.github/branch-protection.md`
