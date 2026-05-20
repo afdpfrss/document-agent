@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "ingest": "node scripts/ingest.mjs",
-    "propose-edit": "node scripts/propose-edit.mjs"
+    "propose-edit": "node scripts/propose-edit.mjs",
+    "validate:corpus": "node scripts/validate-corpus.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

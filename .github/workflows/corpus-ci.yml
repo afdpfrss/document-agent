@@ -1,0 +1,34 @@
+# 必須 CI — ポカヨケ設計 柱1。
+# 文書整合性（validate）と型チェック（typecheck）を全 PR で検証する。
+# ブランチ保護で両ジョブを必須チェックに設定すると、red のままマージできなくなる。
+
+name: corpus-ci
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run validate:corpus
+
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
