@@ -4,6 +4,7 @@
 
 import { auth, type Role } from "@/auth";
 import { productionGuardActive } from "@/lib/config-guard";
+import { audit, ACTOR_ANONYMOUS } from "@/lib/audit-log";
 
 export interface AuthorizedUser {
   email: string;
@@ -19,9 +20,13 @@ export class UnauthenticatedError extends Error {
 }
 
 export class ForbiddenError extends Error {
-  constructor(needed: Role) {
+  // The authenticated user that was rejected — carried so the audit log can
+  // record who attempted a privileged action without the required role.
+  readonly email: string;
+  constructor(needed: Role, email: string) {
     super(`このアクションには「${needed}」ロールが必要です。`);
     this.name = "ForbiddenError";
+    this.email = email;
   }
 }
 
@@ -77,7 +82,7 @@ export async function requireUser(): Promise<AuthorizedUser> {
 export async function requireRole(role: Role): Promise<AuthorizedUser> {
   if (!isAuthEnabled()) return authDisabledUserOrThrow();
   const user = await requireUser();
-  if (user.role !== role) throw new ForbiddenError(role);
+  if (user.role !== role) throw new ForbiddenError(role, user.email);
   return user;
 }
 
@@ -105,9 +110,23 @@ export async function gateForRole(
     return { user, response: null };
   } catch (e) {
     if (e instanceof UnauthenticatedError) {
+      audit({
+        event: "auth.denied",
+        actor: ACTOR_ANONYMOUS,
+        source: "web",
+        outcome: "denied",
+        detail: { role, reason: "unauthenticated" },
+      });
       return { user: null, response: errorResponse(e.message, 401) };
     }
     if (e instanceof ForbiddenError) {
+      audit({
+        event: "auth.denied",
+        actor: e.email,
+        source: "web",
+        outcome: "denied",
+        detail: { role, reason: "forbidden" },
+      });
       return { user: null, response: errorResponse(e.message, 403) };
     }
     if (e instanceof MisconfiguredError) {

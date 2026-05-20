@@ -18,6 +18,7 @@ import {
   proposeEditMulti,
 } from "@/lib/github";
 import { productionGuardActive } from "@/lib/config-guard";
+import { audit } from "@/lib/audit-log";
 
 const ROOT = process.cwd();
 
@@ -241,6 +242,18 @@ export async function proposeDocumentEdit(
     // ignore — labelling is a UI nicety; the body markers are authoritative.
   }
 
+  audit({
+    event: "pr.created",
+    actor: proposer,
+    source: "mcp",
+    outcome: "ok",
+    detail: {
+      docIds: [doc.id],
+      prNumber: result.prNumber,
+      editCount: edits.length,
+    },
+  });
+
   return {
     ok: true,
     doc_id: doc.id,
@@ -384,6 +397,18 @@ export async function proposeRelatedEdit(
   } catch {
     // ignore — labelling is a UI nicety; the body markers are authoritative.
   }
+
+  audit({
+    event: "pr.created",
+    actor: proposer,
+    source: "mcp",
+    outcome: "ok",
+    detail: {
+      docIds: outcomes.map((o) => o.docId),
+      prNumber: result.prNumber,
+      editCount: totalEdits,
+    },
+  });
 
   return {
     ok: true,

@@ -27,6 +27,7 @@ import {
   verifyAccessToken,
 } from "@/lib/mcp/oauth";
 import { productionGuardActive } from "@/lib/config-guard";
+import { audit, ACTOR_ANONYMOUS } from "@/lib/audit-log";
 
 // Node runtime: the search tools read documents/ off the filesystem via
 // node:fs (see lib/document-utils.ts), and the OAuth layer uses node:crypto.
@@ -120,17 +121,38 @@ async function handleMcp(req: Request): Promise<Response> {
     const header = (req.headers.get("authorization") ?? "").trim();
     const match = /^Bearer\s+(.+)$/i.exec(header);
     if (!match) {
+      audit({
+        event: "mcp.auth.denied",
+        actor: ACTOR_ANONYMOUS,
+        source: "mcp",
+        outcome: "denied",
+        detail: { reason: "missing_bearer" },
+      });
       return unauthorized(req, "Authentication required.");
     }
     const token = match[1];
     const claims = verifyAccessToken(token);
     if (!claims) {
+      audit({
+        event: "mcp.auth.denied",
+        actor: ACTOR_ANONYMOUS,
+        source: "mcp",
+        outcome: "denied",
+        detail: { reason: "invalid_token" },
+      });
       return unauthorized(req, "Invalid or expired access token.");
     }
     const email = typeof claims.sub === "string" ? claims.sub : "";
     // Re-check the allowlist on every call so removing an email takes effect
     // without waiting for the token to expire.
     if (!isAllowedMcpUser(email)) {
+      audit({
+        event: "mcp.auth.denied",
+        actor: email || ACTOR_ANONYMOUS,
+        source: "mcp",
+        outcome: "denied",
+        detail: { reason: "not_allowed" },
+      });
       return unauthorized(req, "User is not allowed to use this connector.");
     }
     const expectedAud = mcpResourceUrl(req);
@@ -141,6 +163,13 @@ async function handleMcp(req: Request): Promise<Response> {
       typeof claims.aud !== "string" ||
       normalizeUrl(claims.aud) !== normalizeUrl(expectedAud)
     ) {
+      audit({
+        event: "mcp.auth.denied",
+        actor: email || ACTOR_ANONYMOUS,
+        source: "mcp",
+        outcome: "denied",
+        detail: { reason: "audience_mismatch" },
+      });
       return unauthorized(req, "Access token audience mismatch.");
     }
     authInfo = {
@@ -156,6 +185,7 @@ async function handleMcp(req: Request): Promise<Response> {
         name: typeof claims.name === "string" ? claims.name : email,
       },
     };
+    audit({ event: "mcp.auth.ok", actor: email, source: "mcp", outcome: "ok" });
   }
 
   // Stateless: a fresh server + transport per request. The Streamable HTTP
