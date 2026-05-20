@@ -13,6 +13,7 @@
 //   GITHUB_REPO_NAME     default: document-agent
 //   GITHUB_BASE_BRANCH   default: main
 
+import crypto from "node:crypto";
 import { Octokit } from "octokit";
 
 export interface GithubRepoConfig {
@@ -116,53 +117,68 @@ export async function proposeEdit(input: ProposeEditInput): Promise<ProposeEditR
     throw err;
   }
 
-  // 3. Look up the existing file's blob SHA on the new branch. createOrUpdate
-  //    requires `sha` when the path already exists (PUT replaces a blob).
-  //    A 404 means we're creating a new file — that's allowed too.
-  let existingSha: string | undefined;
+  // From here on, any failure must roll back the branch ref — leaving an
+  // orphan branch behind would 422 every subsequent attempt for this doc.
   try {
-    const existing = await oct.rest.repos.getContent({
+    // 3. Look up the existing file's blob SHA on the new branch.
+    //    createOrUpdate requires `sha` when the path already exists (PUT
+    //    replaces a blob). A 404 means we're creating a new file — allowed too.
+    let existingSha: string | undefined;
+    try {
+      const existing = await oct.rest.repos.getContent({
+        owner,
+        repo,
+        path: input.path,
+        ref: branchName,
+      });
+      if (!Array.isArray(existing.data) && existing.data.type === "file") {
+        existingSha = existing.data.sha;
+      }
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status !== 404) throw err;
+    }
+
+    // 4. Commit the file change to the new branch.
+    const commit = await oct.rest.repos.createOrUpdateFileContents({
       owner,
       repo,
       path: input.path,
-      ref: branchName,
+      message: input.message,
+      content: Buffer.from(input.content, "utf8").toString("base64"),
+      branch: branchName,
+      sha: existingSha,
     });
-    if (!Array.isArray(existing.data) && existing.data.type === "file") {
-      existingSha = existing.data.sha;
-    }
+
+    // 5. Open the PR. We always target baseBranch — multi-target PRs are not
+    //    part of the v2 design.
+    const pr = await oct.rest.pulls.create({
+      owner,
+      repo,
+      head: branchName,
+      base: baseBranch,
+      title: input.message,
+      body: input.prBody ?? "",
+    });
+
+    return {
+      branch: branchName,
+      prNumber: pr.data.number,
+      prUrl: pr.data.html_url,
+      commitSha: commit.data.commit.sha ?? "",
+    };
   } catch (err) {
-    const status = (err as { status?: number }).status;
-    if (status !== 404) throw err;
+    try {
+      await oct.rest.git.deleteRef({
+        owner,
+        repo,
+        ref: `heads/${branchName}`,
+      });
+    } catch {
+      // best-effort cleanup; the original error is what matters
+    }
+    throw err;
   }
-
-  // 4. Commit the file change to the new branch.
-  const commit = await oct.rest.repos.createOrUpdateFileContents({
-    owner,
-    repo,
-    path: input.path,
-    message: input.message,
-    content: Buffer.from(input.content, "utf8").toString("base64"),
-    branch: branchName,
-    sha: existingSha,
-  });
-
-  // 5. Open the PR. We always target baseBranch — multi-target PRs are not
-  //    part of the v2 design.
-  const pr = await oct.rest.pulls.create({
-    owner,
-    repo,
-    head: branchName,
-    base: baseBranch,
-    title: input.message,
-    body: input.prBody ?? "",
-  });
-
-  return {
-    branch: branchName,
-    prNumber: pr.data.number,
-    prUrl: pr.data.html_url,
-    commitSha: commit.data.commit.sha ?? "",
-  };
 }
 
 export interface PullRequestSummary {
@@ -312,25 +328,29 @@ export async function getPullRequestChecks(
 
   const out: PullRequestCheck[] = [];
 
-  const checkRuns = await oct.rest.checks.listForRef({
+  // Paginate both surfaces: a PR with >100 check runs (matrix CI) would
+  // otherwise hide a failing run on a later page, making merge_edit report a
+  // green gate that GitHub will actually reject.
+  const checkRuns = await oct.paginate(oct.rest.checks.listForRef, {
     owner,
     repo,
     ref,
     per_page: 100,
   });
-  for (const run of checkRuns.data.check_runs) {
+  for (const run of checkRuns) {
     out.push({
       context: run.name,
       state: normalizeCheckRun(run.status, run.conclusion),
     });
   }
 
-  const combined = await oct.rest.repos.getCombinedStatusForRef({
+  const statuses = await oct.paginate(oct.rest.repos.getCombinedStatusForRef, {
     owner,
     repo,
     ref,
+    per_page: 100,
   });
-  for (const s of combined.data.statuses) {
+  for (const s of statuses) {
     out.push({ context: s.context, state: normalizeStatusState(s.state) });
   }
 
@@ -589,10 +609,12 @@ export async function proposeEditMulti(
   }
 }
 
-// Generates a branch name that is unique-per-second and filesystem-safe.
-// Format: edit/<doc-id-or-basename>-<unix-ts>. We intentionally include the
-// file basename rather than the full path so the branch name stays short
-// enough for GitHub's UI.
+// Generates a unique, filesystem-safe branch name.
+// Format: edit/<doc-id-or-basename>-<unix-ts>-<rand>. The random suffix is
+// essential: a second-granularity timestamp alone collides whenever two edits
+// to the same document land in the same second (a retry, two users, or a
+// batched multi-tool call), and CJK filenames sanitize to a near-constant
+// prefix — a collision aborts an already-validated edit with a 422.
 export function defaultBranchName(filePath: string): string {
   const base = filePath
     .split("/")
@@ -600,5 +622,6 @@ export function defaultBranchName(filePath: string): string {
     .replace(/\.md$/i, "")
     .replace(/[^A-Za-z0-9._-]/g, "-")
     .slice(0, 40);
-  return `edit/${base}-${Math.floor(Date.now() / 1000)}`;
+  const rand = crypto.randomBytes(4).toString("hex");
+  return `edit/${base}-${Math.floor(Date.now() / 1000)}-${rand}`;
 }
