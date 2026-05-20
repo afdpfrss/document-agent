@@ -19,12 +19,14 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { createMcpServer } from "@/lib/mcp/server";
 import {
+  hasMcpAllowlist,
   isAllowedMcpUser,
   isMcpAuthEnabled,
   mcpResourceUrl,
   protectedResourceMetadataUrl,
   verifyAccessToken,
 } from "@/lib/mcp/oauth";
+import { productionGuardActive } from "@/lib/config-guard";
 
 // Node runtime: the search tools read documents/ off the filesystem via
 // node:fs (see lib/document-utils.ts), and the OAuth layer uses node:crypto.
@@ -75,11 +77,43 @@ function unauthorized(req: Request, description: string): Response {
   );
 }
 
+// 503 for a misconfigured production deployment — distinct from 401 (which
+// means "authenticate"), this means "the server refuses to serve until an
+// operator fixes the configuration".
+function serviceUnavailable(description: string): Response {
+  return withCors(
+    new Response(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        error: { code: -32002, message: description },
+        id: null,
+      }),
+      { status: 503, headers: { "Content-Type": "application/json" } },
+    ),
+  );
+}
+
 export function OPTIONS(): Response {
   return new Response(null, { status: 204, headers: CORS });
 }
 
 async function handleMcp(req: Request): Promise<Response> {
+  // Production guard: the MCP connector exposes the whole corpus to whoever
+  // holds the URL. In production it must sit behind OAuth AND an internal-user
+  // allowlist — fail closed otherwise. Escape hatch: ALLOW_INSECURE_DEPLOY.
+  if (productionGuardActive()) {
+    if (!isMcpAuthEnabled()) {
+      return serviceUnavailable(
+        "本番環境では MCP コネクタに認証が必須です（AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET を設定してください）。",
+      );
+    }
+    if (!hasMcpAllowlist()) {
+      return serviceUnavailable(
+        "本番環境では MCP コネクタに allowlist が必須です（MCP_ALLOWED_EMAILS または MCP_ALLOWED_EMAIL_DOMAINS を設定してください）。",
+      );
+    }
+  }
+
   let authInfo: AuthInfo | undefined;
 
   if (isMcpAuthEnabled()) {

@@ -4,7 +4,11 @@ import {
   type ChatTurn,
   type SearchEvent,
 } from "@/lib/gemini-search";
-import { requireUser, UnauthenticatedError } from "@/lib/auth-helpers";
+import {
+  requireUser,
+  MisconfiguredError,
+  UnauthenticatedError,
+} from "@/lib/auth-helpers";
 import { friendlyLlmError } from "@/lib/llm-errors";
 
 export const runtime = "nodejs";
@@ -42,6 +46,9 @@ export async function POST(req: Request) {
   } catch (e) {
     if (e instanceof UnauthenticatedError) {
       return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    if (e instanceof MisconfiguredError) {
+      return NextResponse.json({ error: e.message }, { status: 503 });
     }
     throw e;
   }
