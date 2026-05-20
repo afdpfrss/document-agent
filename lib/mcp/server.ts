@@ -14,8 +14,15 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getSections, listCategories, searchDocuments } from "./tools";
-import { proposeDocumentEdit } from "./edit-tool";
+import { parseProposerMarker, proposeDocumentEdit } from "./edit-tool";
 import { isMcpAuthEnabled, SCOPE_EDIT } from "./oauth";
+import {
+  getPullRequest,
+  getPullRequestChecks,
+  getPullRequestDiff,
+  getPullRequestReviews,
+  isGithubConfigured,
+} from "@/lib/github";
 
 export const MCP_SERVER_NAME = "document-agent";
 export const MCP_SERVER_VERSION = "0.1.0";
@@ -163,6 +170,70 @@ export function createMcpServer(): McpServer {
       return asToolResult(
         await proposeDocumentEdit(doc_id, edits, summary, proposer),
       );
+    },
+  );
+
+  server.registerTool(
+    "review_edit",
+    {
+      title: "編集 PR のレビュー支援",
+      description:
+        "指定した PR の差分・ファイル別変更量・CI チェック状況・承認状況・記録された提案者を返す読み取り専用ツール。propose_edit / propose_related_edit が作成した PR をレビューするのに使う。このツール自体は承認・マージを行わない。差分が正しいと判断したら GitHub の PR ページを開き、CODEOWNERS レビュアーとして GitHub 上で承認すること。",
+      inputSchema: {
+        pr_number: z
+          .number()
+          .int()
+          .positive()
+          .describe("レビュー対象の PR 番号"),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ pr_number }) => {
+      if (!isGithubConfigured()) {
+        return asToolResult({
+          ok: false,
+          error: "GitHub バックエンドが未設定です（GITHUB_TOKEN）。",
+        });
+      }
+      try {
+        const [pr, diff, checks, reviewInfo] = await Promise.all([
+          getPullRequest(pr_number),
+          getPullRequestDiff(pr_number),
+          getPullRequestChecks(pr_number),
+          getPullRequestReviews(pr_number),
+        ]);
+        // 差分が極端に長い場合だけ切り詰める。文書編集の差分は通常小さい。
+        const MAX_DIFF = 50000;
+        const diffText =
+          diff.diff.length > MAX_DIFF
+            ? `${diff.diff.slice(0, MAX_DIFF)}\n…(差分が長いため ${MAX_DIFF} 文字で切り詰め。全体は PR ページで確認すること)`
+            : diff.diff;
+        return asToolResult({
+          ok: true,
+          pr_number: pr.number,
+          title: pr.title,
+          url: pr.url,
+          branch: pr.branch,
+          state: pr.state,
+          merged: pr.merged,
+          proposer: parseProposerMarker(pr.body),
+          files: diff.files,
+          diff: diffText,
+          checks,
+          reviews: reviewInfo.reviews,
+          mergeable: reviewInfo.mergeable,
+          mergeable_state: reviewInfo.mergeableState,
+          next_step:
+            "差分を確認し、内容が正しければ GitHub の PR ページ（上記 url）を開き、CODEOWNERS レビュアーとして承認すること。このチャットで「承認」と返信しても承認にはならない。",
+        });
+      } catch (err) {
+        return asToolResult({
+          ok: false,
+          error: `PR #${pr_number} を取得できませんでした: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        });
+      }
     },
   );
 

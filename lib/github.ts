@@ -171,6 +171,8 @@ export interface PullRequestSummary {
   state: "open" | "closed";
   merged: boolean;
   branch: string;
+  headSha: string;
+  body: string | null;
   url: string;
   author: string | null;
   createdAt: string;
@@ -193,6 +195,8 @@ export async function listOpenPullRequests(): Promise<PullRequestSummary[]> {
     state: pr.state as "open" | "closed",
     merged: false,
     branch: pr.head.ref,
+    headSha: pr.head.sha,
+    body: pr.body ?? null,
     url: pr.html_url,
     author: pr.user?.login ?? null,
     createdAt: pr.created_at,
@@ -211,10 +215,162 @@ export async function getPullRequest(prNumber: number): Promise<PullRequestSumma
     state: pr.state as "open" | "closed",
     merged: Boolean(pr.merged),
     branch: pr.head.ref,
+    headSha: pr.head.sha,
+    body: pr.body ?? null,
     url: pr.html_url,
     author: pr.user?.login ?? null,
     createdAt: pr.created_at,
     updatedAt: pr.updated_at,
+  };
+}
+
+// --- PR review aids (ポカヨケ設計 柱2 — review_edit MCP ツールの裏側) -------
+
+export interface PullRequestFileChange {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+}
+
+export interface PullRequestDiff {
+  diff: string;
+  files: PullRequestFileChange[];
+}
+
+// Unified diff (mediaType: diff) + a structured per-file change list. Lets the
+// review_edit tool put the actual diff in front of the reviewer.
+export async function getPullRequestDiff(
+  prNumber: number,
+): Promise<PullRequestDiff> {
+  const { owner, repo } = readGithubConfig();
+  const oct = getOctokit();
+  const diffRes = await oct.rest.pulls.get({
+    owner,
+    repo,
+    pull_number: prNumber,
+    mediaType: { format: "diff" },
+  });
+  // With mediaType.format "diff" the response body is the raw diff string,
+  // even though Octokit's static types still describe the PR object.
+  const diff = diffRes.data as unknown as string;
+  const filesRes = await oct.rest.pulls.listFiles({
+    owner,
+    repo,
+    pull_number: prNumber,
+    per_page: 100,
+  });
+  return {
+    diff,
+    files: filesRes.data.map((f) => ({
+      filename: f.filename,
+      status: f.status,
+      additions: f.additions,
+      deletions: f.deletions,
+    })),
+  };
+}
+
+export type CheckState = "success" | "pending" | "failure";
+
+export interface PullRequestCheck {
+  context: string;
+  state: CheckState;
+}
+
+function normalizeCheckRun(
+  status: string,
+  conclusion: string | null,
+): CheckState {
+  if (status !== "completed") return "pending";
+  if (
+    conclusion === "success" ||
+    conclusion === "neutral" ||
+    conclusion === "skipped"
+  ) {
+    return "success";
+  }
+  return "failure";
+}
+
+function normalizeStatusState(state: string): CheckState {
+  if (state === "success") return "success";
+  if (state === "pending") return "pending";
+  return "failure";
+}
+
+// Merges GitHub's two CI surfaces — check runs (Actions) and legacy commit
+// statuses (the separation-of-duties workflow posts one) — into one normalized
+// list so review_edit / merge_edit can reason about a single gate state.
+export async function getPullRequestChecks(
+  prNumber: number,
+): Promise<PullRequestCheck[]> {
+  const { owner, repo } = readGithubConfig();
+  const oct = getOctokit();
+  const pr = await getPullRequest(prNumber);
+  const ref = pr.headSha;
+
+  const out: PullRequestCheck[] = [];
+
+  const checkRuns = await oct.rest.checks.listForRef({
+    owner,
+    repo,
+    ref,
+    per_page: 100,
+  });
+  for (const run of checkRuns.data.check_runs) {
+    out.push({
+      context: run.name,
+      state: normalizeCheckRun(run.status, run.conclusion),
+    });
+  }
+
+  const combined = await oct.rest.repos.getCombinedStatusForRef({
+    owner,
+    repo,
+    ref,
+  });
+  for (const s of combined.data.statuses) {
+    out.push({ context: s.context, state: normalizeStatusState(s.state) });
+  }
+
+  return out;
+}
+
+export interface PullRequestReview {
+  login: string | null;
+  state: string;
+}
+
+export interface PullRequestReviewInfo {
+  reviews: PullRequestReview[];
+  mergeable: boolean | null;
+  mergeableState: string;
+}
+
+export async function getPullRequestReviews(
+  prNumber: number,
+): Promise<PullRequestReviewInfo> {
+  const { owner, repo } = readGithubConfig();
+  const oct = getOctokit();
+  const reviewsRes = await oct.rest.pulls.listReviews({
+    owner,
+    repo,
+    pull_number: prNumber,
+    per_page: 100,
+  });
+  const prRes = await oct.rest.pulls.get({
+    owner,
+    repo,
+    pull_number: prNumber,
+  });
+  return {
+    reviews: reviewsRes.data.map((r) => ({
+      login: r.user?.login ?? null,
+      state: r.state,
+    })),
+    mergeable: prRes.data.mergeable ?? null,
+    mergeableState: prRes.data.mergeable_state ?? "unknown",
   };
 }
 

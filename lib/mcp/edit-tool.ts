@@ -15,6 +15,23 @@ import { isGithubConfigured, proposeEdit } from "@/lib/github";
 
 const ROOT = process.cwd();
 
+// PR 本文に埋め込む機械可読マーカー（ポカヨケ設計 柱3）。separation-of-duties
+// ワークフローが提案者を読み取り、提案者≠承認者を強制するのに使う。<email> は
+// 認証済み OAuth のメールアドレスで、利用者が直接詐称できる値ではない。
+const PROPOSER_MARKER_RE = /<!--\s*poka-yoke:proposer=(\S+?)\s*-->/;
+
+export function buildProposerMarker(proposer: string): string {
+  return `<!-- poka-yoke:proposer=${proposer} -->`;
+}
+
+export function parseProposerMarker(
+  body: string | null | undefined,
+): string | null {
+  if (!body) return null;
+  const m = PROPOSER_MARKER_RE.exec(body);
+  return m ? m[1] : null;
+}
+
 interface EditFailure {
   index: number;
   problem: "not_found" | "ambiguous";
