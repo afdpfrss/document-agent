@@ -152,7 +152,10 @@ async function main() {
     .map(([login]) => login);
 
   if (approverLogins.length === 0) {
-    await postStatus("success", "承認待ち — SoD 違反なし");
+    // 承認が無い段階で success を出すと、承認 webhook が届いてから本チェックが
+    // 再実行されるまでの隙に、古い success が必須チェックを一瞬満たしうる。
+    // pending にしておき、承認が付いて再評価されるまでマージ可能にしない。
+    await postStatus("pending", "承認待ち — 提案者以外の承認が必要です");
     return;
   }
 
