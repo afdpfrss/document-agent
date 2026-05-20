@@ -7,9 +7,11 @@
 // PR via github.proposeEdit(). Human review happens on the PR (no auto-merge,
 // docs/v2-design.md §10).
 
-import fs from "node:fs/promises";
-import path from "node:path";
-import { loadIndex, type DocumentMeta } from "@/lib/document-utils";
+import {
+  loadIndex,
+  readRepoFile,
+  type DocumentMeta,
+} from "@/lib/document-utils";
 import { applyEdits, type FindReplaceEdit } from "@/lib/edit-schema";
 import {
   addPullRequestLabels,
@@ -19,8 +21,6 @@ import {
 } from "@/lib/github";
 import { productionGuardActive } from "@/lib/config-guard";
 import { audit } from "@/lib/audit-log";
-
-const ROOT = process.cwd();
 
 // PR 本文に埋め込む機械可読マーカー（ポカヨケ設計 柱3）。separation-of-duties
 // ワークフローが提案者を読み取り、提案者≠承認者を強制するのに使う。<email> は
@@ -155,7 +155,7 @@ async function applyDocEdits(
 ): Promise<DocEditOutcome | null> {
   const doc = index.find((d) => d.id === docId);
   if (!doc) return null;
-  const original = await fs.readFile(path.join(ROOT, doc.path), "utf8");
+  const original = await readRepoFile(doc.path);
   const { content, statuses } = applyEdits(original, edits);
   const failures: EditFailure[] = statuses
     .filter((s) => s.kind !== "ok")

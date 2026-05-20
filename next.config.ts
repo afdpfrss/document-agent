@@ -1,9 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Node/Vercel deployments read the document corpus off disk at runtime
+  // (lib/document-utils.ts) — trace ./documents into every route bundle since
+  // the .md paths come from index.json and can't be statically detected.
+  // (The Cloudflare/OpenNext build instead embeds the corpus as a module via
+  // scripts/build-corpus.mjs — Workers have no project filesystem.)
   outputFileTracingIncludes: {
-    "/api/search": ["./documents/**/*"],
-    "/api/mcp": ["./documents/**/*"],
+    "/*": ["./documents/**/*"],
   },
   // Serve the OAuth discovery documents at their RFC-mandated /.well-known
   // paths (the MCP client builds these URLs itself). The actual handlers live
@@ -27,3 +31,10 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+
+// Cloudflare (OpenNext) integration. This is a no-op for a plain `next build`
+// /`next dev`; it only wires getCloudflareContext() so bindings declared in
+// wrangler.jsonc are reachable while running `next dev`. The production build
+// for Cloudflare is produced by `opennextjs-cloudflare build`.
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
+initOpenNextCloudflareForDev();
