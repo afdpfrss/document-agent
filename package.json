@@ -9,7 +9,8 @@
     "ingest": "node scripts/ingest.mjs",
     "propose-edit": "node scripts/propose-edit.mjs",
     "validate:corpus": "node scripts/validate-corpus.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:sod": "node scripts/check-separation-of-duties.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

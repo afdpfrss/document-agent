@@ -1,0 +1,40 @@
+# 提案者≠承認者の検証 — ポカヨケ設計 柱3。
+# PR と PR レビューの両方で発火し、commit status
+# `poka-yoke / separation-of-duties` を head SHA に post する。
+# ブランチ保護でこの status を必須チェックにすると、提案者の自己承認では
+# マージできなくなる。
+#
+# スクリプトと edit-authors.json は base ブランチの版を checkout して使う
+# （PR が自分自身の検証ロジックや対応表を書き換えられないようにするため）。
+
+name: separation-of-duties
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  pull_request_review:
+    types: [submitted, dismissed, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  check:
+    name: separation-of-duties
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/check-separation-of-duties.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}

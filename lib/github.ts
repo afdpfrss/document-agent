@@ -374,6 +374,23 @@ export async function getPullRequestReviews(
   };
 }
 
+// Adds labels to a PR. issues.addLabels auto-creates labels that don't exist
+// yet. Used to stamp PRs with the proposer / demo markers (ポカヨケ設計 柱3）。
+export async function addPullRequestLabels(
+  prNumber: number,
+  labels: string[],
+): Promise<void> {
+  if (labels.length === 0) return;
+  const { owner, repo } = readGithubConfig();
+  const oct = getOctokit();
+  await oct.rest.issues.addLabels({
+    owner,
+    repo,
+    issue_number: prNumber,
+    labels,
+  });
+}
+
 export interface ProposeEditMultiInput {
   files: { path: string; content: string }[];
   // Repo-root-relative paths to delete in the same commit. Encoded as tree

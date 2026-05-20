@@ -1,0 +1,4 @@
+{
+  "_note": "email→GitHub ログイン対応表。separation-of-duties チェックが提案者(MCP の認証メール)と承認者(GitHub ログイン)を email に正規化して突合するのに使う。本番でブランチ保護を有効化する前に、編集を提案・承認しうる全メンバーを登録すること。未登録の提案者・承認者は検証不能として fail closed になる。",
+  "authors": []
+}

@@ -11,7 +11,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { loadIndex } from "@/lib/document-utils";
 import { applyEdits, type FindReplaceEdit } from "@/lib/edit-schema";
-import { isGithubConfigured, proposeEdit } from "@/lib/github";
+import {
+  addPullRequestLabels,
+  isGithubConfigured,
+  proposeEdit,
+} from "@/lib/github";
 
 const ROOT = process.cwd();
 
@@ -30,6 +34,22 @@ export function parseProposerMarker(
   if (!body) return null;
   const m = PROPOSER_MARKER_RE.exec(body);
   return m ? m[1] : null;
+}
+
+// 認証オフ時に server.ts が渡す提案者センチネル。SoD では検証不能なので
+// マーカー値・ラベルとも "unverified" にして fail closed させる。
+export const AUTH_OFF_PROPOSER = "mcp-connector (認証オフ)";
+
+function proposerMarkerValue(proposer: string): string {
+  return proposer === AUTH_OFF_PROPOSER ? "unverified" : proposer;
+}
+
+function proposerLabel(proposer: string): string {
+  const slug =
+    proposer === AUTH_OFF_PROPOSER
+      ? "unverified"
+      : proposer.replace(/[^a-zA-Z0-9_.-]/g, "-");
+  return `proposer:${slug}`;
 }
 
 interface EditFailure {
@@ -131,6 +151,8 @@ export async function proposeDocumentEdit(
     "",
     `---`,
     `この PR は人間レビュー前提です。差分を確認のうえマージしてください（自動マージなし / v2 設計 §10）。`,
+    "",
+    buildProposerMarker(proposerMarkerValue(proposer)),
   ].join("\n");
 
   const result = await proposeEdit({
@@ -139,6 +161,14 @@ export async function proposeDocumentEdit(
     message: summary,
     prBody,
   });
+
+  // 提案者ラベルはベストエフォート — SoD の正本は本文の提案者マーカー。
+  // ラベル付けに失敗しても PR 作成自体は成功しているので握りつぶす。
+  try {
+    await addPullRequestLabels(result.prNumber, [proposerLabel(proposer)]);
+  } catch {
+    // ignore — labelling is a UI nicety; the body marker is authoritative.
+  }
 
   return {
     ok: true,

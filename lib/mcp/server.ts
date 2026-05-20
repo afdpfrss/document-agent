@@ -14,7 +14,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getSections, listCategories, searchDocuments } from "./tools";
-import { parseProposerMarker, proposeDocumentEdit } from "./edit-tool";
+import {
+  AUTH_OFF_PROPOSER,
+  parseProposerMarker,
+  proposeDocumentEdit,
+} from "./edit-tool";
 import { isMcpAuthEnabled, SCOPE_EDIT } from "./oauth";
 import {
   getPullRequest,
@@ -166,7 +170,7 @@ export function createMcpServer(): McpServer {
       }
       const email = extra.authInfo?.extra?.email;
       const proposer =
-        typeof email === "string" ? email : "mcp-connector (認証オフ)";
+        typeof email === "string" ? email : AUTH_OFF_PROPOSER;
       return asToolResult(
         await proposeDocumentEdit(doc_id, edits, summary, proposer),
       );
