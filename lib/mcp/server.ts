@@ -25,6 +25,7 @@ import {
   proposeDocumentEdit,
   proposeRelatedEdit,
 } from "./edit-tool";
+import { ingestDocuments } from "./ingest-tool";
 import { isMcpAuthEnabled, SCOPE_EDIT, SCOPE_MERGE } from "./oauth";
 import {
   getPullRequest,
@@ -49,6 +50,7 @@ list_categories でカテゴリ一覧と文書数を確認できます。
 ドキュメントの編集（編集→レビュー→承認→マージ）:
 - propose_edit — 1つの文書に {find, replace, reason} の構造化編集を適用し PR を作成する。
 - find_text_occurrences / propose_related_edit — 同じ記述を複数の関連資料にまとめて修正する「横展開」。先に find_text_occurrences で影響範囲を全件確認してから propose_related_edit に渡す。
+- ingest_documents — 新規ドキュメント（複数可）をコーパスに追加し PR を作成する。元ファイルの Markdown 化とフロントマター生成は呼び出し側（あなた）が行い、このサーバは決定的な組み立てと PR 作成だけを担う。
 - review_edit — PR の差分・CI・承認状況を取得する。承認自体は GitHub の PR ページで行う。
 - merge_edit — ゲート（CI・CODEOWNERS 承認・提案者≠承認者）をすべて満たした PR をマージする。
 
@@ -272,6 +274,87 @@ export function createMcpServer(): McpServer {
       const proposer = typeof email === "string" ? email : AUTH_OFF_PROPOSER;
       return asToolResult(
         await proposeRelatedEdit(changes, summary, proposer),
+      );
+    },
+  );
+
+  server.registerTool(
+    "ingest_documents",
+    {
+      title: "新規ドキュメントの取り込み（PR 作成）",
+      description:
+        "1件以上の新規ドキュメントをコーパスに追加し、GitHub に branch + PR を作成する。呼び出し側（あなた）が、元ファイル（Word/Excel/PDF/Markdown 等）の Markdown 化と、各文書のフロントマター（title / category / keywords / summary）の生成の両方を行うこと。このサーバは AI 推論を一切行わず、セクションマーカー付与・doc_id 採番・フロントマター組み立て・index.json 更新・PR 作成という決定的な処理だけを担う。\n\n各 documents 要素の body は本文 Markdown のみ（フロントマターは含めない。title 等は別フィールドで渡す）。本文中の `## ` 見出しがセクションとして認識される。category は事前に list_categories で既存カテゴリを確認してから指定すること（新規カテゴリも可だが、既存への統一を推奨）。\n\n複数ファイルは documents 配列にまとめて1回で渡すと、すべてが1つの PR にまとまる。1件でも不正があれば PR は作られず診断が返る（all-or-nothing）。反映（マージ）は人間の PR レビュー後。",
+      inputSchema: {
+        documents: z
+          .array(
+            z.object({
+              body: z
+                .string()
+                .min(1)
+                .describe(
+                  "本文 Markdown（フロントマターは含めない）。`## ` 見出しがセクションになる",
+                ),
+              title: z
+                .string()
+                .min(1)
+                .max(120)
+                .describe("ドキュメントのタイトル"),
+              category: z
+                .string()
+                .min(1)
+                .max(60)
+                .describe(
+                  "カテゴリ。list_categories で既存カテゴリを確認してから指定する",
+                ),
+              keywords: z
+                .array(z.string().min(1))
+                .max(12)
+                .describe(
+                  "検索用キーワード（メタデータ駆動検索の精度に直結するので必ず付ける）",
+                ),
+              summary: z
+                .string()
+                .min(1)
+                .max(400)
+                .describe("本文の要約（80〜200字程度）"),
+              source_format: z
+                .enum(["html", "docx", "pdf", "xlsx", "csv", "txt", "md"])
+                .optional()
+                .describe("元ファイルの形式（任意・既定 md）"),
+            }),
+          )
+          .min(1)
+          .max(10)
+          .describe(
+            "取り込む新規ドキュメントの配列（最大10件、すべて1つの PR にまとまる）",
+          ),
+        summary: z
+          .string()
+          .min(1)
+          .max(150)
+          .describe("PR タイトル兼コミットメッセージ（簡潔に）"),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: true,
+      },
+    },
+    async ({ documents, summary }, extra) => {
+      if (isMcpAuthEnabled()) {
+        const scopes = extra.authInfo?.scopes ?? [];
+        if (!scopes.includes(SCOPE_EDIT)) {
+          return asToolResult({
+            ok: false,
+            error:
+              "この操作には mcp:edit スコープが必要です。編集権限のあるアカウント（EDITOR_EMAILS）でコネクタを認可し直してください。",
+          });
+        }
+      }
+      const email = extra.authInfo?.extra?.email;
+      const proposer = typeof email === "string" ? email : AUTH_OFF_PROPOSER;
+      return asToolResult(
+        await ingestDocuments(documents, summary, proposer),
       );
     },
   );
