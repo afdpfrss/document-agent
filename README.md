@@ -71,7 +71,7 @@ lib/
 ├── audit-log.ts            構造化監査ログ
 ├── llm-config.ts           LLM 設定の環境変数抽象化
 ├── llm-errors.ts           LLM エラーの整形
-├── intro-phrases.ts / persona.ts / sample-prompts.ts   チャット UI の文言
+├── persona.ts / sample-prompts.ts   チャット UI の文言
 ├── rehype-merged-cells.ts  表セル結合の Markdown レンダリング
 ├── build-info.ts           UI フッターのビルド識別子
 └── mcp/                    MCP サーバ（server / tools / edit-tool /
