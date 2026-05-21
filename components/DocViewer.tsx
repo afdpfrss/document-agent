@@ -18,60 +18,47 @@ interface Props {
 }
 
 export function DocViewer({ doc, sections, canEdit = false }: Props) {
-  // Browsers normally honor #anchor on navigation, but when the target page is
-  // a Next.js client-rendered route the hash can be processed before the
-  // section element exists. Re-trigger the scroll + brief highlight so the user
-  // sees where they landed. Keyed on doc.id so it also re-runs on in-app
-  // navigation between two /docs/[id] routes (which reuse this component).
-  //
-  // A chat citation link also carries the cited clause text as ?cite=. When it
-  // does, we don't stop at the section top: the server resolved the exact
-  // 条/項, so we match its text against the rendered 条/項 elements (<p>/<li>)
-  // and land on — and highlight — that clause. An exact, whitespace-insensitive
-  // substring match wins; a bigram fallback covers truncation or markdown drift.
+  // A chat citation deep-links to the exact passage the answer drew on. The
+  // server passes that passage's text as ?cite= — a snippet it guaranteed to
+  // be unique within the document, so a plain text search here is collision-
+  // free regardless of the document's format. Deliberately NOT a URL #hash: a
+  // hash would make the browser scroll to the section and override this. The
+  // matched passage is marked persistently so the reader sees what was cited.
+  // Keyed on doc.id so it re-runs on in-app navigation between /docs/[id]
+  // routes (which reuse this component).
   useEffect(() => {
-    const hash = window.location.hash.slice(1);
-    if (!hash) return;
-    const sectionEl = document.getElementById(hash);
-    if (!sectionEl) return;
-
     const cite = new URLSearchParams(window.location.search).get("cite") ?? "";
-    let target: Element = sectionEl;
-    let highlightClass = "doc-section-highlight";
+    const needle = cite.replace(/\s+/g, "");
+    if (!needle) return;
 
-    if (cite) {
-      const candidates = Array.from(sectionEl.querySelectorAll("li, p"));
-      const needle = cite.replace(/\s+/g, "");
-      let best: Element | null = null;
-      for (const el of candidates) {
-        if ((el.textContent ?? "").replace(/\s+/g, "").includes(needle)) {
-          best = el;
-          break;
-        }
-      }
-      if (!best) {
-        let bestScore = 0;
-        for (const el of candidates) {
-          const score = sectionScore(cite, el.textContent ?? "");
-          if (score > bestScore) {
-            bestScore = score;
-            best = el;
-          }
-        }
-      }
-      if (best) {
-        target = best;
-        highlightClass = "doc-clause-highlight";
+    // The snippet is unique document-wide, so search the whole article body.
+    const candidates = Array.from(
+      document.querySelectorAll(
+        ".markdown p, .markdown li, .markdown td, .markdown blockquote",
+      ),
+    );
+    let target: Element | null = null;
+    for (const el of candidates) {
+      if ((el.textContent ?? "").replace(/\s+/g, "").includes(needle)) {
+        target = el;
+        break;
       }
     }
+    if (!target) {
+      // Bigram fallback — covers a passage edited since the link was made.
+      let bestScore = 0;
+      for (const el of candidates) {
+        const score = sectionScore(cite, el.textContent ?? "");
+        if (score > bestScore) {
+          bestScore = score;
+          target = el;
+        }
+      }
+    }
+    if (!target) return;
 
-    target.scrollIntoView({
-      behavior: "auto",
-      block: target === sectionEl ? "start" : "center",
-    });
-    target.classList.add(highlightClass);
-    const t = setTimeout(() => target.classList.remove(highlightClass), 1800);
-    return () => clearTimeout(t);
+    target.scrollIntoView({ behavior: "auto", block: "center" });
+    target.classList.add("doc-clause-mark");
   }, [doc.id]);
 
   return (

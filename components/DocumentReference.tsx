@@ -1,31 +1,31 @@
 "use client";
 
 import { useState } from "react";
-import type { ClauseLocation } from "@/lib/clause-locate";
+import type { CitedLocation } from "@/lib/clause-locate";
 
 export interface SearchSource {
   doc_id: string;
   title: string;
   category: string;
-  // The single 条/項 this document contributed to the answer.
-  cited: ClauseLocation;
+  // The passage this document contributed to the answer.
+  cited: CitedLocation;
 }
 
-// "第3章 機器貸与と費用負担 › 第13条(機器貸与) › 第1項" — drops the parts that
-// don't exist (a section with no 条 structure, or a 条 with no numbered 項).
-function citationLabel(c: ClauseLocation): string {
+// "第3章 機器貸与と費用負担 · 第13条(機器貸与) · 第1項" — the 条/項 parts are
+// appended only when the document actually has that structure.
+function locationLabel(c: CitedLocation): string {
   const parts = [c.section_title];
   if (c.article) parts.push(c.article);
   if (c.paragraph != null) parts.push(`第${c.paragraph}項`);
-  return parts.join(" › ");
+  return parts.join(" · ");
 }
 
-// Deep-link to the cited clause. `?cite=` carries the clause text so the doc
-// viewer can scroll to (and highlight) the exact 条/項; the #section hash is
-// the graceful fallback when no clause text was resolved.
-function citationHref(c: ClauseLocation, docId: string): string {
-  const cite = c.snippet ? `?cite=${encodeURIComponent(c.snippet)}` : "";
-  return `/docs/${docId}${cite}#${c.section_id}`;
+// Deep-link to the cited passage. The unique snippet is passed as ?cite= (no
+// URL #hash — a hash would make the browser scroll to the section instead).
+function citationHref(c: CitedLocation, docId: string): string {
+  return c.snippet
+    ? `/docs/${docId}?cite=${encodeURIComponent(c.snippet)}`
+    : `/docs/${docId}`;
 }
 
 export function DocumentReference({ sources }: { sources: SearchSource[] }) {
@@ -75,14 +75,19 @@ export function DocumentReference({ sources }: { sources: SearchSource[] }) {
                 href={citationHref(s.cited, s.doc_id)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="group flex items-baseline gap-1.5"
+                className="group block"
               >
-                <span className="shrink-0 text-[10px] font-semibold text-indigo-700">
+                <span className="text-[10px] font-semibold text-indigo-700">
                   参考にした箇所
                 </span>
-                <span className="text-slate-700 group-hover:text-indigo-700 group-hover:underline">
-                  {citationLabel(s.cited)}
+                <span className="block text-slate-600">
+                  {locationLabel(s.cited)}
                 </span>
+                {s.cited.snippet && (
+                  <span className="block mt-0.5 text-slate-700 group-hover:text-indigo-700 group-hover:underline">
+                    「{s.cited.snippet}…」
+                  </span>
+                )}
               </a>
             </li>
           ))}
