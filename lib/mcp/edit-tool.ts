@@ -82,6 +82,28 @@ const DEMO_MARKER = "<!-- poka-yoke:demo -->";
 const DEMO_LABEL = "demo";
 const DEMO_TITLE_PREFIX = "[DEMO] ";
 
+// 単独運用モード（零細企業向け）。MCP_SOLO_APPROVER_MODE=true のとき、PR に
+// 単独運用印（本文マーカー・solo-approver ラベル）を付ける。separation-of-duties
+// ワークフローはこの印を見て提案者≠承認者チェックを非適用にし、文書の作成者
+// （提案者）自身の承認でマージできるようにする。文書の作成・承認・マージを
+// 1 人で担う零細企業の正規の運用形態。
+//
+// デモモードとの違い:
+//  - デモモードはプレゼン用で、本番ガード（productionGuardActive）が本番では
+//    強制的に無効化する（MCP_DEMO_MODE の消し忘れ事故を防ぐため）。
+//  - 単独運用モードは零細企業の本番運用そのものなので、本番でも有効でなければ
+//    意味がない。よって本番ガードでは打ち消さない。代わりに config-guard が
+//    起動時ログで「SoD が無効化されている」ことを可視化する。
+//
+// どちらのモードでも緩和されるのは SoD のみ — corpus CI（文書整合性）と
+// CODEOWNERS 承認は通常どおり必須。
+export function isSoloApproverMode(): boolean {
+  return process.env.MCP_SOLO_APPROVER_MODE === "true";
+}
+
+const SOLO_APPROVER_MARKER = "<!-- poka-yoke:solo-approver -->";
+const SOLO_APPROVER_LABEL = "solo-approver";
+
 interface PrDecoration {
   title: string;
   markerLines: string[];
@@ -100,6 +122,12 @@ export function prDecoration(
   if (demo) {
     markerLines.push(DEMO_MARKER);
     labels.push(DEMO_LABEL);
+  }
+  // 単独運用モードは正規の編集 PR なのでタイトル接頭辞は付けない（[DEMO] と
+  // 違い、デモではなく実運用の編集だから）。SoD 非適用の根拠はマーカー。
+  if (isSoloApproverMode()) {
+    markerLines.push(SOLO_APPROVER_MARKER);
+    labels.push(SOLO_APPROVER_LABEL);
   }
   return {
     title: demo ? `${DEMO_TITLE_PREFIX}${rawSummary}` : rawSummary,

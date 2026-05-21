@@ -16,6 +16,8 @@ import {
   buildProposerMarker,
   parseProposerMarker,
   isDemoMode,
+  isSoloApproverMode,
+  prDecoration,
 } from "@/lib/mcp/edit-tool";
 
 describe("proposer marker (separation-of-duties)", () => {
@@ -61,5 +63,55 @@ describe("isDemoMode", () => {
     vi.stubEnv("ALLOW_INSECURE_DEPLOY", "true");
     vi.stubEnv("MCP_DEMO_MODE", "true");
     expect(isDemoMode()).toBe(true);
+  });
+});
+
+describe("isSoloApproverMode", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("is true when MCP_SOLO_APPROVER_MODE=true", () => {
+    vi.stubEnv("MCP_SOLO_APPROVER_MODE", "true");
+    expect(isSoloApproverMode()).toBe(true);
+  });
+
+  it("is false when unset", () => {
+    vi.stubEnv("MCP_SOLO_APPROVER_MODE", "");
+    expect(isSoloApproverMode()).toBe(false);
+  });
+
+  it("stays enabled in production — it is the legitimate micro-business mode, not force-disabled like demo mode", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("ALLOW_INSECURE_DEPLOY", "");
+    vi.stubEnv("MCP_SOLO_APPROVER_MODE", "true");
+    expect(isSoloApproverMode()).toBe(true);
+  });
+});
+
+describe("prDecoration", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("adds only the proposer marker when no special mode is set", () => {
+    vi.stubEnv("MCP_DEMO_MODE", "");
+    vi.stubEnv("MCP_SOLO_APPROVER_MODE", "");
+    const deco = prDecoration("規程を更新", "alice@example.com");
+    expect(deco.title).toBe("規程を更新");
+    expect(deco.labels).toEqual(["proposer:alice-example.com"]);
+    expect(deco.markerLines.some((l) => l.includes("solo-approver"))).toBe(
+      false,
+    );
+  });
+
+  it("adds the solo-approver marker and label without a [DEMO] title prefix", () => {
+    vi.stubEnv("MCP_DEMO_MODE", "");
+    vi.stubEnv("MCP_SOLO_APPROVER_MODE", "true");
+    const deco = prDecoration("規程を更新", "alice@example.com");
+    // 単独運用モードは正規の編集 PR なのでタイトルは素のまま。
+    expect(deco.title).toBe("規程を更新");
+    expect(deco.labels).toContain("solo-approver");
+    expect(deco.markerLines).toContain("<!-- poka-yoke:solo-approver -->");
   });
 });
