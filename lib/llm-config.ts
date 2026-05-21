@@ -1,19 +1,36 @@
 // Centralised LLM configuration.
-// Lets us swap models or providers (Gemini → Sakura AI Engine, etc.) via env
-// vars without touching call sites. See docs/v2-design.md §6, §7.
+//
+// The whole agent runs on Cloudflare Workers AI (docs/v2-design.md §6, §7).
+// Model IDs and credentials are env-driven, so a future provider swap
+// (さくらの AI Engine など) only has to touch lib/workers-ai.ts plus these
+// defaults — call sites stay untouched.
 
 export const llmConfig = {
-  candidateModel: process.env.LLM_CANDIDATE_MODEL ?? "gemini-2.5-flash-lite",
-  answerModel: process.env.LLM_ANSWER_MODEL ?? "gemini-2.5-flash",
-  embeddingModel: process.env.LLM_EMBEDDING_MODEL ?? "text-embedding-004",
-  apiKey: process.env.GEMINI_API_KEY,
+  // Cloudflare Workers AI model IDs (the `@cf/...` namespace).
+  // candidate = lightweight selection model, answer = high-quality model.
+  candidateModel:
+    process.env.LLM_CANDIDATE_MODEL ?? "@cf/meta/llama-3.1-8b-instruct-fast",
+  answerModel:
+    process.env.LLM_ANSWER_MODEL ?? "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  embeddingModel: process.env.LLM_EMBEDDING_MODEL ?? "@cf/baai/bge-m3",
+  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+  apiToken: process.env.CLOUDFLARE_AI_API_TOKEN,
 } as const;
 
-export function requireApiKey(): string {
-  if (!llmConfig.apiKey) {
+// True when Workers AI credentials are present. Call sites use this to fail
+// soft (vector search) or return a 503 (chat / edit routes).
+export function isLlmConfigured(): boolean {
+  return Boolean(llmConfig.accountId && llmConfig.apiToken);
+}
+
+export function requireLlmCredentials(): {
+  accountId: string;
+  apiToken: string;
+} {
+  if (!llmConfig.accountId || !llmConfig.apiToken) {
     throw new Error(
-      "GEMINI_API_KEY is not configured. Set it in .env.local before running the search.",
+      "Workers AI is not configured. Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_AI_API_TOKEN in .env.local before running the search.",
     );
   }
-  return llmConfig.apiKey;
+  return { accountId: llmConfig.accountId, apiToken: llmConfig.apiToken };
 }
