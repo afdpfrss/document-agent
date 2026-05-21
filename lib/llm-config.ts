@@ -5,7 +5,7 @@
 export const llmConfig = {
   candidateModel: process.env.LLM_CANDIDATE_MODEL ?? "gemini-2.5-flash-lite",
   answerModel: process.env.LLM_ANSWER_MODEL ?? "gemini-2.5-flash",
-  embeddingModel: process.env.LLM_EMBEDDING_MODEL ?? "text-embedding-004",
+  embeddingModel: process.env.LLM_EMBEDDING_MODEL ?? "gemini-embedding-001",
   apiKey: process.env.GEMINI_API_KEY,
 } as const;
 
