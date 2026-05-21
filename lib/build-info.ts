@@ -1,4 +1,5 @@
 // Build identifier surfaced in the UI footer so the deployed build is
-// verifiable at a glance. Updated manually when cutting a notable build.
-export const BUILD_NUMBER = 86;
-export const BUILD_DATE = "2026-05-21";
+// verifiable at a glance. The values are AUTO-GENERATED at build time by
+// scripts/build-corpus.mjs (runs on postinstall / cf:build) into
+// lib/generated/build-info.ts. BUILD_NUMBER is the git commit count.
+export { BUILD_NUMBER, BUILD_SHA, BUILD_DATE } from "./generated/build-info";
