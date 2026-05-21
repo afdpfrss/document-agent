@@ -8,8 +8,8 @@
 // own Claude. This server runs only the deterministic, non-AI steps:
 // section-marker injection, doc_id assignment, frontmatter assembly, index.json
 // update, and opening the PR. No answer-generating LLM and no developer-side
-// Workers AI calls are involved, so the MCP ingestion path stays entirely on
-// the user's AI (no fallback).
+// Gemini are involved, so the MCP ingestion path stays entirely on the user's
+// AI (no fallback).
 
 import { loadIndex, type DocumentMeta } from "@/lib/document-utils";
 import {

@@ -12,7 +12,6 @@ import { loadIndex } from "@/lib/document-utils";
 import { proposeEditsViaLlm } from "@/lib/edit-llm";
 import { applyEdits } from "@/lib/edit-schema";
 import { gateForRole } from "@/lib/auth-helpers";
-import { isLlmConfigured } from "@/lib/llm-config";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -54,7 +53,7 @@ export async function POST(
     );
   }
 
-  if (!isLlmConfigured()) {
+  if (!process.env.GEMINI_API_KEY) {
     return NextResponse.json(
       { error: "サーバーの設定が完了していません。管理者にお問い合わせください。" },
       { status: 503 },

@@ -1,36 +1,35 @@
-// Workers AI proposal generation for chat-based editing (v2 Phase 6).
+// Gemini-side proposal generation for chat-based editing (v2 Phase 6).
 //
-// Uses a json_schema response format to force the model to emit
-// {find, replace, reason}[] instead of free-form prose, so we never have to
-// robust-parse a creative answer. Combined with applyEdits()'s exact-substring
-// matching, this gives a fail-loud pipeline: if the model hallucinates
-// context, the apply step rejects the edit with `not_found` rather than
-// mangling the file.
+// Uses responseSchema to force the model to emit {find, replace, reason}[]
+// instead of free-form prose, so we never have to robust-parse a creative
+// answer. Combined with applyEdits()'s exact-substring matching, this gives
+// us a fail-loud pipeline: if the model hallucinates context, the apply
+// step rejects the edit with `not_found` rather than mangling the file.
 
-import { llmConfig } from "./llm-config";
-import { runJson } from "./workers-ai";
+import { GoogleGenerativeAI, SchemaType, type ResponseSchema } from "@google/generative-ai";
+import { llmConfig, requireApiKey } from "./llm-config";
 import type { EditProposal } from "./edit-schema";
 
-const PROPOSAL_SCHEMA = {
-  type: "object",
+const PROPOSAL_SCHEMA: ResponseSchema = {
+  type: SchemaType.OBJECT,
   properties: {
     edits: {
-      type: "array",
+      type: SchemaType.ARRAY,
       description: "順序付き編集リスト。順に適用される。",
       items: {
-        type: "object",
+        type: SchemaType.OBJECT,
         properties: {
           find: {
-            type: "string",
+            type: SchemaType.STRING,
             description:
               "原文に1箇所だけ存在する逐語の部分文字列。前後の文脈を含めて一意になるようにする。",
           },
           replace: {
-            type: "string",
+            type: SchemaType.STRING,
             description: "置換後のテキスト。削除する場合は空文字。",
           },
           reason: {
-            type: "string",
+            type: SchemaType.STRING,
             description: "この編集の理由（1-2文）。レビュアーが PR で読む。",
           },
         },
@@ -51,7 +50,18 @@ export interface ProposeEditsInput {
 export async function proposeEditsViaLlm(
   input: ProposeEditsInput,
 ): Promise<EditProposal> {
-  const prompt = `指示に従ってドキュメントを編集する「最小の置換操作」のリストを JSON で出力してください。
+  const client = new GoogleGenerativeAI(requireApiKey());
+  const model = client.getGenerativeModel({
+    model: llmConfig.answerModel,
+    generationConfig: {
+      temperature: 0.2,
+      responseMimeType: "application/json",
+      responseSchema: PROPOSAL_SCHEMA,
+    },
+  });
+
+  const prompt = `あなたは社内ドキュメントの編集を支援するアシスタントです。
+指示に従ってドキュメントを編集する「最小の置換操作」のリストを JSON で出力してください。
 
 # 重要な制約
 - 出力は {edits: [{find, replace, reason}, ...]} の形式のみ。
@@ -72,39 +82,23 @@ ${input.instruction}
 # ドキュメント本文
 ${input.originalContent}`;
 
-  const res = await runJson<EditProposal>({
-    model: llmConfig.answerModel,
-    messages: [
-      {
-        role: "system",
-        content: "あなたは社内ドキュメントの編集を支援するアシスタントです。",
-      },
-      { role: "user", content: prompt },
-    ],
-    schema: PROPOSAL_SCHEMA,
-    temperature: 0.2,
-    maxTokens: 4096,
-  });
-
-  const parsed = res.data;
-  if (!parsed || !Array.isArray(parsed.edits)) {
+  const result = await model.generateContent(prompt);
+  const text = result.response.text();
+  const parsed = JSON.parse(text) as EditProposal;
+  if (!Array.isArray(parsed.edits)) {
     return { edits: [] };
   }
   // Defensive cleanup — the schema constrains the shape but the model can
   // still emit empty strings or extra whitespace that we want to normalise.
-  return {
-    edits: parsed.edits
-      .filter(
-        (e) =>
-          e &&
-          typeof e.find === "string" &&
-          typeof e.replace === "string" &&
-          e.find.length > 0,
-      )
-      .map((e) => ({
-        find: e.find,
-        replace: e.replace,
-        reason: String(e.reason ?? "").slice(0, 500),
-      })),
-  };
+  parsed.edits = parsed.edits
+    .filter(
+      (e) =>
+        e && typeof e.find === "string" && typeof e.replace === "string" && e.find.length > 0,
+    )
+    .map((e) => ({
+      find: e.find,
+      replace: e.replace,
+      reason: String(e.reason ?? "").slice(0, 500),
+    }));
+  return parsed;
 }

@@ -87,9 +87,9 @@ export async function searchDocuments(
     if (s > 0) metaScores.set(doc.id, s);
   }
 
-  // Vector layer is best-effort: a missing embeddings.json, missing Workers AI
-  // credentials, or a failed embed call all degrade silently to metadata-only
-  // (docs/v2-design.md §2; lib/hybrid-search.ts contract).
+  // Vector layer is best-effort: a missing embeddings.json, a missing
+  // GEMINI_API_KEY, or a failed embed call all degrade silently to
+  // metadata-only (docs/v2-design.md §2; lib/hybrid-search.ts contract).
   const hits = await vectorSearch(query, 15).catch(() => null);
   const vecScores = new Map<string, number>();
   if (hits) {

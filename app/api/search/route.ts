@@ -3,7 +3,7 @@ import {
   searchDocumentsStream,
   type ChatTurn,
   type SearchEvent,
-} from "@/lib/search";
+} from "@/lib/gemini-search";
 import {
   requireUser,
   MisconfiguredError,
@@ -11,7 +11,6 @@ import {
   type AuthorizedUser,
 } from "@/lib/auth-helpers";
 import { friendlyLlmError } from "@/lib/llm-errors";
-import { isLlmConfigured } from "@/lib/llm-config";
 import { audit, ACTOR_ANONYMOUS } from "@/lib/audit-log";
 
 export const runtime = "nodejs";
@@ -93,7 +92,7 @@ export async function POST(req: Request) {
     detail: { questionLength: question.length, historyLength: history.length },
   });
 
-  if (!isLlmConfigured()) {
+  if (!process.env.GEMINI_API_KEY) {
     return NextResponse.json(
       { error: "サーバーの設定が完了していません。管理者にお問い合わせください。" },
       { status: 503 },

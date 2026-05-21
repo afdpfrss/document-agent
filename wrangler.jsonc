@@ -12,9 +12,8 @@
   "observability": {
     "enabled": true
   }
-  // Secrets (CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_AI_API_TOKEN / AUTH_SECRET /
-  // AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET / GITHUB_TOKEN / MCP_ALLOWED_* etc.)
-  // are NOT defined here. Set them with
+  // Secrets (GEMINI_API_KEY / AUTH_SECRET / AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET
+  // / GITHUB_TOKEN / MCP_ALLOWED_* etc.) are NOT defined here. Set them with
   // `wrangler secret put <NAME>` or in the Cloudflare dashboard. For local
   // `wrangler dev` / `opennextjs-cloudflare preview`, put them in `.dev.vars`.
 }

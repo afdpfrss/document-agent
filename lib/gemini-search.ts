@@ -1,22 +1,13 @@
-// Staged-disclosure document search, running on Cloudflare Workers AI.
-//
-//   Step 1  candidate selection  (lightweight model, JSON output)
-//   Step 2  section body fetch   (file I/O, no LLM)
-//   Step 3  answer generation    (high-quality model, streamed)
-//
-// docs/v2-design.md §3. The v3→v4 transition moved every LLM call here off
-// Google Gemini onto Workers AI (lib/workers-ai.ts); Gemini context caching
-// (the former lib/prompt-cache.ts) has no Workers AI equivalent and is gone.
-
+import { GoogleGenerativeAI, type UsageMetadata } from "@google/generative-ai";
 import {
   buildIndexSnippet,
   loadIndex,
   loadSections,
   type DocumentMeta,
 } from "./document-utils";
-import { llmConfig } from "./llm-config";
+import { llmConfig, requireApiKey } from "./llm-config";
 import { renderVectorBlock, vectorSearch } from "./hybrid-search";
-import { runJson, runTextStream, WorkersAiError, type WorkersAiUsage } from "./workers-ai";
+import { getOrCreateStep1Cache, STEP1_SYSTEM_INSTRUCTION } from "./prompt-cache";
 import { OFFTOPIC_FALLBACK_INSTRUCTION, PERSONA_INSTRUCTION } from "./persona";
 import { pickIntro } from "./intro-phrases";
 
@@ -33,53 +24,6 @@ export interface SearchSource {
   section_titles: string[];
 }
 
-// Step 1 system instruction. Selects which documents/sections to read and
-// detects the question language.
-const STEP1_SYSTEM_INSTRUCTION = `あなたは社内ドキュメント検索のアシスタントです。下記のドキュメント一覧（フロントマター+サマリー）から、ユーザーの質問に答えるために本文を読むべきドキュメントとセクションを **0〜3件** 選んでください。あわせて、ユーザーの質問の言語を検出してください。
-
-# 出力形式（JSONのみ。説明文や前置きは禁止）
-{
-  "language": "ja",
-  "candidates": [
-    {"doc_id": "doc_xxx", "section_ids": ["sec_x", "sec_y"], "reason": "なぜこのセクションが必要か（1-2文）"}
-  ]
-}
-
-# 候補選定の必須ルール（厳守）
-1. **主題の一致が必須**: ドキュメント／セクションの主題（タイトル・サマリー・キーワードから読み取れる中心テーマ）が、質問の主題と一致している場合のみ候補とする。
-2. **単語の表層一致だけで選ばない**: 例えば「禁止」「規程」「ルール」「セキュリティ」「管理」などの一般語が共通するだけでは候補にしない。質問が「セキュリティポリシーで禁止されていることは？」なら、情報セキュリティ／ISMS 系のドキュメントのみが候補。ハラスメント防止規程に「禁止される行為」セクションがあっても、ハラスメントは情報セキュリティの主題ではないので候補にしない。
-3. **件数を埋めない**: 主題が一致するドキュメントが 1 件しかなければ 1 件、0 件なら空配列 \`[]\` を返す。無理に 3 件にしない。
-4. **疑わしきは除外**: reason 欄に「関連がありそう」「念のため」「補足として」のような留保が必要なものは候補に入れない。
-5. **会話履歴がある場合**: 直前のターンで言及された主題の継続（「それ」「詳しく」など指示語・省略表現を含む）と読めるなら、その主題でルール1〜4を再評価する。ただし、履歴に出ただけで現在の質問の主題と一致しないなら採用しない。履歴をきっかけにルール1〜4を緩めてはならない。
-
-# その他のルール
-- "language" は質問本文の言語を BCP-47 の主言語サブタグ（2〜3文字）で表す。例: 日本語=ja, 英語=en, 中国語=zh, 韓国語=ko, フランス語=fr, スペイン語=es, ドイツ語=de, ベトナム語=vi, タイ語=th。判定に迷う場合は ja。
-- ドキュメント本文・キーワード・要約は日本語のままだが、質問が他言語でも意味的に関連するなら候補に含めてよい。
-- 1ドキュメントあたりセクションは最大3つまで。
-- ベクトル類似度上位として参考情報が与えられても、上記ルール1〜4で主題が一致しないと判断したものは採用しない。類似度は補助情報にすぎない。
-- 該当なしの場合は {"language": "<検出した言語>", "candidates": []} を返す。`;
-
-// json_schema constraint for Step 1's structured output.
-const STEP1_SCHEMA = {
-  type: "object",
-  properties: {
-    language: { type: "string" },
-    candidates: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          doc_id: { type: "string" },
-          section_ids: { type: "array", items: { type: "string" } },
-          reason: { type: "string" },
-        },
-        required: ["doc_id", "section_ids", "reason"],
-      },
-    },
-  },
-  required: ["language", "candidates"],
-} as const;
-
 // Render recent chat turns as a prompt block. Caller is responsible for any
 // trimming/sanitisation — we just format what we're given. Returns "" for
 // empty input so callers can unconditionally interpolate.
@@ -91,8 +35,10 @@ function renderHistoryBlock(history: ChatTurn[] | undefined): string {
   return `# これまでの会話\n${lines.join("\n")}\n\n`;
 }
 
-// Per-stage token usage. Workers AI has no context-cache product, so the
-// cached* fields are always zero — kept on the type for a stable wire shape.
+// Per-stage token + implicit-cache observation. v2 design Phase 2: we don't
+// configure explicit caching yet — we just measure what Gemini's implicit
+// cache gives us (cachedContentTokenCount on UsageMetadata) so we can decide
+// whether explicit caching (Phase 8) is worth the engineering effort.
 export interface UsageSummary {
   stage: "candidates" | "answer";
   model: string;
@@ -100,6 +46,7 @@ export interface UsageSummary {
   cachedTokens: number;
   outputTokens: number;
   totalTokens: number;
+  // cachedTokens / promptTokens, 0 when promptTokens === 0.
   cacheRatio: number;
 }
 
@@ -125,20 +72,53 @@ interface Step1Result {
   usage: UsageSummary | null;
 }
 
+function getClient(): GoogleGenerativeAI {
+  return new GoogleGenerativeAI(requireApiKey());
+}
+
+function extractJson(text: string): unknown {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const raw = fenced ? fenced[1] : text;
+  const start = raw.search(/[\[{]/);
+  if (start < 0) throw new Error(`No JSON found in model output: ${text.slice(0, 200)}`);
+  return JSON.parse(raw.slice(start).trim());
+}
+
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/429|rate|quota|5\d\d|unavailable|deadline/i.test(msg) && i < attempts - 1) {
+        const delay = 500 * 2 ** i;
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
+
 function summarizeUsage(
   stage: UsageSummary["stage"],
   model: string,
-  usage: WorkersAiUsage | null,
+  meta: UsageMetadata | undefined,
 ): UsageSummary | null {
-  if (!usage) return null;
+  if (!meta) return null;
+  const promptTokens = meta.promptTokenCount ?? 0;
+  const cachedTokens = meta.cachedContentTokenCount ?? 0;
   return {
     stage,
     model,
-    promptTokens: usage.promptTokens,
-    cachedTokens: 0,
-    outputTokens: usage.outputTokens,
-    totalTokens: usage.totalTokens,
-    cacheRatio: 0,
+    promptTokens,
+    cachedTokens,
+    outputTokens: meta.candidatesTokenCount ?? 0,
+    totalTokens: meta.totalTokenCount ?? 0,
+    cacheRatio: promptTokens > 0 ? cachedTokens / promptTokens : 0,
   };
 }
 
@@ -146,7 +126,7 @@ function summarizeUsage(
 // any log aggregator without a parser. Keys match UsageSummary fields.
 function logUsage(u: UsageSummary): void {
   console.log(
-    `[search.usage] stage=${u.stage} model=${u.model} prompt=${u.promptTokens} output=${u.outputTokens} total=${u.totalTokens}`,
+    `[search.usage] stage=${u.stage} model=${u.model} prompt=${u.promptTokens} cached=${u.cachedTokens} ratio=${u.cacheRatio.toFixed(3)} output=${u.outputTokens} total=${u.totalTokens}`,
   );
 }
 
@@ -160,6 +140,12 @@ function normalizeLanguage(raw: unknown): string {
   const capped = primary.slice(0, 3);
   return capped.length >= 2 ? capped : "ja";
 }
+
+const STEP1_GENERATION_CONFIG = {
+  temperature: 0.1,
+  responseMimeType: "application/json",
+  maxOutputTokens: 512,
+} as const;
 
 async function step1FindCandidates(
   question: string,
@@ -183,38 +169,58 @@ async function step1FindCandidates(
   const vectorBlock = vectorHits ? renderVectorBlock(vectorHits) : "";
   const historyBlock = renderHistoryBlock(history);
 
-  const userPrompt = `${vectorBlock}# ドキュメント一覧
+  // Phase 8: try explicit context caching for the fixed prefix (system
+  // instruction + doc list). The cache layer returns null on any failure —
+  // missing key, too-small content, transient API error — and we fall back
+  // to the inline path that Phases 1-4 used.
+  const cached = await getOrCreateStep1Cache(indexSnippet);
+
+  const client = getClient();
+  let result;
+  if (cached) {
+    const model = client.getGenerativeModelFromCachedContent(cached, {
+      generationConfig: STEP1_GENERATION_CONFIG,
+    });
+    // Per-request body only carries the variable parts (vector hint + history
+    // + the actual question). Everything else lives in the cached prefix, so
+    // history must stay in this tail to keep the cache key stable.
+    const variablePrompt = `${vectorBlock}${historyBlock}# ユーザーの質問\n${question}`;
+    result = await withRetry(() => model.generateContent(variablePrompt));
+  } else {
+    const model = client.getGenerativeModel({
+      model: llmConfig.candidateModel,
+      systemInstruction: STEP1_SYSTEM_INSTRUCTION,
+      generationConfig: STEP1_GENERATION_CONFIG,
+    });
+    const inlinePrompt = `${vectorBlock}# ドキュメント一覧
 ${indexSnippet}
 
 ${historyBlock}# ユーザーの質問
 ${question}`;
+    result = await withRetry(() => model.generateContent(inlinePrompt));
+  }
 
-  // Content/parse failures degrade to "no candidates" (the fallback path then
-  // replies in persona). Infrastructure errors — HTTP 4xx/5xx, missing
-  // credentials — propagate so the route can surface a quota/config message.
+  // Blocked responses / non-JSON output must degrade to "no candidates" rather
+  // than throw — otherwise vague follow-ups bubble up as "検索中にエラー" in
+  // the route catch. The fallback path will pick this up and respond in
+  // persona.
   let parsed: Partial<Step1Result> = {};
-  let usage: WorkersAiUsage | null = null;
   try {
-    const res = await runJson<Partial<Step1Result>>({
-      model: llmConfig.candidateModel,
-      messages: [
-        { role: "system", content: STEP1_SYSTEM_INSTRUCTION },
-        { role: "user", content: userPrompt },
-      ],
-      schema: STEP1_SCHEMA,
-      temperature: 0.1,
-      maxTokens: 1024,
-    });
-    parsed = res.data ?? {};
-    usage = res.usage;
+    const text = result.response.text();
+    parsed = extractJson(text) as Partial<Step1Result>;
   } catch (e) {
-    if (!(e instanceof WorkersAiError) || e.status !== 200) throw e;
-    console.warn(`[search.step1] parse/blocked: ${e.message}`);
+    console.warn(
+      `[search.step1] parse/blocked: ${e instanceof Error ? e.message : e}`,
+    );
   }
   return {
     language: normalizeLanguage(parsed.language),
-    candidates: Array.isArray(parsed.candidates) ? parsed.candidates : [],
-    usage: summarizeUsage("candidates", llmConfig.candidateModel, usage),
+    candidates: parsed.candidates ?? [],
+    usage: summarizeUsage(
+      "candidates",
+      llmConfig.candidateModel,
+      result.response.usageMetadata,
+    ),
   };
 }
 
@@ -227,6 +233,12 @@ async function* step3StreamAnswer(
   }>,
   history?: ChatTurn[],
 ): AsyncGenerator<string, UsageSummary | null, void> {
+  const client = getClient();
+  const model = client.getGenerativeModel({
+    model: llmConfig.answerModel,
+    generationConfig: { temperature: 0.2 },
+  });
+
   const contextText = contextBlocks
     .map((b) => {
       const secs = b.sections
@@ -238,7 +250,9 @@ async function* step3StreamAnswer(
 
   const historyBlock = renderHistoryBlock(history);
 
-  const userPrompt = `以下の参考資料のみを根拠に、簡潔かつ正確に回答してください。
+  const prompt = `${PERSONA_INSTRUCTION}
+
+以下の参考資料のみを根拠に、簡潔かつ正確に回答してください。
 
 # 回答言語
 ユーザーの質問の言語: ${language}（BCP-47 主言語サブタグ。例: ja=日本語, en=英語, zh=中国語, ko=韓国語）
@@ -260,25 +274,16 @@ ${contextText}
 - ドキュメント名・セクション名・固有名詞は原文（日本語）のまま引用してよい。
 - 参考資料に答えがない場合は、回答言語で「該当する記載がありません」に相当する旨を 1〜2 文で示し、隣接領域に関する記載があれば触れる程度に留める。`;
 
-  const gen = runTextStream({
-    model: llmConfig.answerModel,
-    messages: [
-      { role: "system", content: PERSONA_INSTRUCTION },
-      { role: "user", content: userPrompt },
-    ],
-    temperature: 0.2,
-    maxTokens: 4096,
-  });
-  let usage: WorkersAiUsage | null = null;
-  while (true) {
-    const { value, done } = await gen.next();
-    if (done) {
-      usage = value;
-      break;
-    }
-    if (value) yield value;
+  const result = await withRetry(() => model.generateContentStream(prompt));
+  for await (const chunk of result.stream) {
+    const t = chunk.text();
+    if (t) yield t;
   }
-  return summarizeUsage("answer", llmConfig.answerModel, usage);
+  // After the stream is drained, result.response resolves with the aggregated
+  // response — including usageMetadata for the full call. Returned via the
+  // generator's TReturn so the caller can emit a typed usage event.
+  const final = await result.response;
+  return summarizeUsage("answer", llmConfig.answerModel, final.usageMetadata);
 }
 
 // Persona-tinted fallback when Step 1 finds nothing usable. No document
@@ -289,32 +294,28 @@ async function* step3FallbackStream(
   language: string,
   history?: ChatTurn[],
 ): AsyncGenerator<string, UsageSummary | null, void> {
+  const client = getClient();
+  const model = client.getGenerativeModel({
+    model: llmConfig.answerModel,
+    generationConfig: { temperature: 0.4 },
+  });
+
   const historyBlock = renderHistoryBlock(history);
-  const userPrompt = `# 回答言語
+  const prompt = `${OFFTOPIC_FALLBACK_INSTRUCTION}
+
+# 回答言語
 ${language}（BCP-47 主言語サブタグ）
 
 ${historyBlock}# ユーザーの質問
 ${question}`;
 
-  const gen = runTextStream({
-    model: llmConfig.answerModel,
-    messages: [
-      { role: "system", content: OFFTOPIC_FALLBACK_INSTRUCTION },
-      { role: "user", content: userPrompt },
-    ],
-    temperature: 0.4,
-    maxTokens: 2048,
-  });
-  let usage: WorkersAiUsage | null = null;
-  while (true) {
-    const { value, done } = await gen.next();
-    if (done) {
-      usage = value;
-      break;
-    }
-    if (value) yield value;
+  const result = await withRetry(() => model.generateContentStream(prompt));
+  for await (const chunk of result.stream) {
+    const t = chunk.text();
+    if (t) yield t;
   }
-  return summarizeUsage("answer", llmConfig.answerModel, usage);
+  const final = await result.response;
+  return summarizeUsage("answer", llmConfig.answerModel, final.usageMetadata);
 }
 
 // Last-resort static fallback used only if the LLM fallback call itself
@@ -364,8 +365,9 @@ export async function* searchDocumentsStream(
 ): AsyncGenerator<SearchEvent> {
   const index = await loadIndex();
 
-  // 受け止めの一言はルールベースのプリセットから即決定する。LLM 待ちが
-  // 消えるので Step 1 と直列にしても遅延は増えない。
+  // 受け止めの一言はルールベースのプリセットから即決定する（旧 generateIntro の
+  // Gemini 呼び出しを廃止）。LLM 待ちが消えるので Step 1 と直列にしても遅延は
+  // 増えない。
   const intro = pickIntro(question);
   yield { type: "delta", text: intro };
 
@@ -413,8 +415,8 @@ export async function* searchDocumentsStream(
     section_titles: b.sections.map((s) => s.title),
   }));
 
-  // Step 3 generates the body only (no 一言, no marker). Prefix a paragraph
-  // break so the body renders cleanly below the announcement.
+  // Step 3 now generates the body only (no 一言, no marker). Prefix a
+  // paragraph break so the body renders cleanly below the announcement.
   let bodyStarted = false;
   const gen = step3StreamAnswer(question, language, blocks, history);
   while (true) {

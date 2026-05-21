@@ -291,7 +291,7 @@ export function ChatWindow() {
           </button>
         </form>
         <p className="text-xs text-slate-400 mt-2 text-center">
-          回答はAIが生成しています。重要事項は必ず原文を確認してください。
+          回答はAI（Gemini）が生成しています。重要事項は必ず原文を確認してください。
         </p>
       </div>
     </div>
