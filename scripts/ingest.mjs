@@ -17,6 +17,12 @@
 // The script is dev tooling — it lives in scripts/ and is not bundled with the
 // Next.js app. Heavy converters (mammoth, xlsx, pdfjs-dist, turndown) are
 // devDependencies and loaded lazily so we only pay for the formats we use.
+//
+// NOTE: lib/ingest-core.ts holds a parallel copy of this conversion logic for
+// the web upload path (app/api/upload/...). The duplication is intentional —
+// Node's type-stripping for .ts imports from .mjs is brittle, so this CLI keeps
+// its own copy. The two are kept in sync by hand: when you change one, change
+// the other.
 
 import fs from "node:fs/promises";
 import path from "node:path";
