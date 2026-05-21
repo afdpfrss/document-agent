@@ -71,6 +71,17 @@ function parseAllSections(content) {
       if (m) i++; // skip the marker line
       continue;
     }
+    if (line.startsWith("# ")) {
+      // An h1 (e.g. a 章 divider in a 規程 whose 条 are the "## " sections)
+      // is not itself a section. Flush so its text never bleeds into the
+      // body of the section that precedes it; the divider belongs to no
+      // section and is dropped.
+      flush();
+      currentId = null;
+      currentTitle = "";
+      buffer = [];
+      continue;
+    }
     buffer.push(line);
   }
   flush();
