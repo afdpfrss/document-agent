@@ -3,6 +3,7 @@ import {
   searchDocumentsStream,
   type ChatTurn,
   type SearchEvent,
+  type SearchFocus,
 } from "@/lib/gemini-search";
 import {
   requireUser,
@@ -36,6 +37,26 @@ function sanitizeHistory(raw: unknown): ChatTurn[] {
   return out.slice(-MAX_HISTORY_MESSAGES);
 }
 
+// A drill-down chip click carries the previous turn's candidate doc ids so the
+// follow-up can skip Step 1. Untrusted client input — validate shape and the
+// id format; unknown ids are harmless (resolved against the index downstream),
+// but the format check keeps obviously bad data out.
+function sanitizeFocus(raw: unknown): SearchFocus | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const { doc_ids, language } = raw as { doc_ids?: unknown; language?: unknown };
+  if (!Array.isArray(doc_ids)) return undefined;
+  const ids = doc_ids
+    .filter((x): x is string => typeof x === "string")
+    .map((s) => s.trim())
+    .filter((s) => /^[a-zA-Z0-9_-]{1,40}$/.test(s))
+    .slice(0, 3);
+  if (ids.length === 0) return undefined;
+  return {
+    doc_ids: ids,
+    language: typeof language === "string" ? language : "ja",
+  };
+}
+
 function friendlyError(message: string): string {
   return friendlyLlmError(message, "検索中にエラーが発生しました。");
 }
@@ -63,7 +84,7 @@ export async function POST(req: Request) {
     throw e;
   }
 
-  let body: { question?: string; history?: unknown };
+  let body: { question?: string; history?: unknown; focus?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -71,6 +92,7 @@ export async function POST(req: Request) {
   }
 
   const history = sanitizeHistory(body.history);
+  const focus = sanitizeFocus(body.focus);
   const question = (body.question ?? "").trim();
   if (!question) {
     return NextResponse.json({ error: "question is required" }, { status: 400 });
@@ -106,7 +128,7 @@ export async function POST(req: Request) {
         controller.enqueue(encoder.encode(JSON.stringify(ev) + "\n"));
       };
       try {
-        for await (const ev of searchDocumentsStream(question, history)) {
+        for await (const ev of searchDocumentsStream(question, history, focus)) {
           write(ev);
         }
       } catch (err) {
