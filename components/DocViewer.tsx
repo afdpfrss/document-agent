@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { DocumentMeta } from "@/lib/document-utils";
 import { rehypeMergedCells } from "@/lib/rehype-merged-cells";
-import { sectionScore } from "@/lib/text-score";
+import { canonical, textHash } from "@/lib/text-score";
 
 interface Props {
   doc: DocumentMeta;
@@ -19,40 +19,23 @@ interface Props {
 
 export function DocViewer({ doc, sections, canEdit = false }: Props) {
   // A chat citation deep-links to the exact passage the answer drew on. The
-  // server passes that passage's text as ?cite= — a snippet it guaranteed to
-  // be unique within the document, so a plain text search here is collision-
-  // free regardless of the document's format. Deliberately NOT a URL #hash: a
-  // hash would make the browser scroll to the section and override this. The
-  // matched passage is marked persistently so the reader sees what was cited.
-  // Keyed on doc.id so it re-runs on in-app navigation between /docs/[id]
-  // routes (which reuse this component).
+  // server passes an opaque content-hash token as ?cite= (no readable text, no
+  // URL #hash). We hash each rendered block the same way (lib/text-score) and
+  // mark the one that matches. No #hash means the browser does not scroll to a
+  // section and override us. Keyed on doc.id so it re-runs on in-app navigation
+  // between /docs/[id] routes (which reuse this component).
   useEffect(() => {
-    const cite = new URLSearchParams(window.location.search).get("cite") ?? "";
-    const needle = cite.replace(/\s+/g, "");
-    if (!needle) return;
+    const token = new URLSearchParams(window.location.search).get("cite") ?? "";
+    if (!token) return;
 
-    // The snippet is unique document-wide, so search the whole article body.
-    const candidates = Array.from(
-      document.querySelectorAll(
-        ".markdown p, .markdown li, .markdown td, .markdown blockquote",
-      ),
+    const candidates = document.querySelectorAll(
+      ".markdown p, .markdown li, .markdown td, .markdown blockquote",
     );
     let target: Element | null = null;
     for (const el of candidates) {
-      if ((el.textContent ?? "").replace(/\s+/g, "").includes(needle)) {
+      if (textHash(canonical(el.textContent ?? "")) === token) {
         target = el;
         break;
-      }
-    }
-    if (!target) {
-      // Bigram fallback — covers a passage edited since the link was made.
-      let bestScore = 0;
-      for (const el of candidates) {
-        const score = sectionScore(cite, el.textContent ?? "");
-        if (score > bestScore) {
-          bestScore = score;
-          target = el;
-        }
       }
     }
     if (!target) return;

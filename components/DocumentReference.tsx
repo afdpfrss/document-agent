@@ -20,12 +20,10 @@ function locationLabel(c: CitedLocation): string {
   return parts.join(" · ");
 }
 
-// Deep-link to the cited passage. The unique snippet is passed as ?cite= (no
-// URL #hash — a hash would make the browser scroll to the section instead).
+// Deep-link to the cited passage. ?cite= carries an opaque content-hash token
+// (no readable text, no URL #hash) which the doc viewer resolves and marks.
 function citationHref(c: CitedLocation, docId: string): string {
-  return c.snippet
-    ? `/docs/${docId}?cite=${encodeURIComponent(c.snippet)}`
-    : `/docs/${docId}`;
+  return c.token ? `/docs/${docId}?cite=${c.token}` : `/docs/${docId}`;
 }
 
 export function DocumentReference({ sources }: { sources: SearchSource[] }) {
@@ -83,9 +81,9 @@ export function DocumentReference({ sources }: { sources: SearchSource[] }) {
                 <span className="block text-slate-600">
                   {locationLabel(s.cited)}
                 </span>
-                {s.cited.snippet && (
+                {s.cited.quote && (
                   <span className="block mt-0.5 text-slate-700 group-hover:text-indigo-700 group-hover:underline">
-                    「{s.cited.snippet}…」
+                    「{s.cited.quote}」
                   </span>
                 )}
               </a>
