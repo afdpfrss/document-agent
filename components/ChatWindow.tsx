@@ -27,10 +27,6 @@ interface ChatMessage {
   sources?: SearchSource[];
   error?: boolean;
   streaming?: boolean;
-  // True between the 一言 and the body — the server emitted `intermission`
-  // and we are waiting for the next delta. Render loading dots below the
-  // already-shown intro until the next chunk arrives.
-  intermission?: boolean;
   // Drill-down suggestions rendered as clickable chips below the answer.
   followups?: string[];
   // Carry context for a chip click: re-sending one of `followups` with this
@@ -169,7 +165,6 @@ export function ChatWindow() {
           content: data.error ?? "エラーが発生しました。",
           error: true,
           streaming: false,
-          intermission: false,
         });
         return;
       }
@@ -184,13 +179,7 @@ export function ChatWindow() {
         const line = raw.trim();
         if (!line) return;
         let ev: {
-          type:
-            | "sources"
-            | "delta"
-            | "intermission"
-            | "followups"
-            | "done"
-            | "error";
+          type: "sources" | "delta" | "followups" | "done" | "error";
           sources?: SearchSource[];
           text?: string;
           error?: string;
@@ -211,9 +200,7 @@ export function ChatWindow() {
             firstDelta = false;
             setLoading(false);
           }
-          updateAssistant({ content, intermission: false });
-        } else if (ev.type === "intermission") {
-          updateAssistant({ intermission: true });
+          updateAssistant({ content });
         } else if (ev.type === "followups") {
           updateAssistant({
             followups: ev.items ?? [],
@@ -223,13 +210,12 @@ export function ChatWindow() {
             },
           });
         } else if (ev.type === "done") {
-          updateAssistant({ streaming: false, intermission: false });
+          updateAssistant({ streaming: false });
         } else if (ev.type === "error") {
           updateAssistant({
             content: ev.error ?? "エラーが発生しました。",
             error: true,
             streaming: false,
-            intermission: false,
           });
         }
       };
@@ -248,7 +234,7 @@ export function ChatWindow() {
       // the final newline) — otherwise a last done/error event would be lost.
       buffer += decoder.decode();
       handleLine(buffer);
-      updateAssistant({ streaming: false, intermission: false });
+      updateAssistant({ streaming: false });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "通信エラーが発生しました。";
       setMessages((m) => {
@@ -381,20 +367,10 @@ function MessageBubble({
               >
                 {message.content}
               </ReactMarkdown>
-              {message.streaming && !message.intermission && (
+              {message.streaming && (
                 <span className="streaming-caret" aria-hidden />
               )}
             </div>
-            {message.intermission && (
-              <div
-                className="mt-3 flex items-center gap-1.5"
-                aria-label="本文を生成中"
-              >
-                <span className="streaming-dot" />
-                <span className="streaming-dot" style={{ animationDelay: "150ms" }} />
-                <span className="streaming-dot" style={{ animationDelay: "300ms" }} />
-              </div>
-            )}
             {message.sources && message.sources.length > 0 && (
               <DocumentReference sources={message.sources} />
             )}
