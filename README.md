@@ -5,7 +5,7 @@
 ## 特徴
 
 - **段階的コンテキスト開示**: フロントマター → セクション本文 → 回答 の 3 ステップで API トークンを節約
-- **2 モデル使い分け**: 候補抽出は軽量な `llama-3.1-8b-instruct-fast`、回答生成は高品質な `llama-3.3-70b-instruct-fp8-fast`（ともに Cloudflare Workers AI）
+- **軽量モデルに統一**: 候補抽出・回答生成とも Workers AI の `llama-3.1-8b-instruct-fast`（無料枠 Neurons を抑えるため。品質を上げたいときは `LLM_ANSWER_MODEL` で上位モデルへ）
 - **出典表示**: 参照したドキュメントとセクションをアコーディオン形式で常に提示
 - **チャット UI**: Markdown レンダリング、ローディング表示、レスポンシブ
 
@@ -61,7 +61,7 @@ scripts/
    全ドキュメントのフロントマター（id, title, category, keywords, summary, sections）のみを渡し、関連ドキュメント TOP-3 と読むべきセクション ID を JSON で返させる。
 2. **Step 2 — セクション本文取得**
    特定されたセクションだけを MD ファイルから抽出（最大 3000 文字/セクション）。
-3. **Step 3 — 回答生成** (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`)
+3. **Step 3 — 回答生成** (`@cf/meta/llama-3.1-8b-instruct-fast`)
    フロントマター + サマリー + 指定セクション本文を渡し、Markdown 形式で出典付きの回答を生成。
 
 ## トークン削減のイメージ

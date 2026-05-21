@@ -7,11 +7,12 @@
 
 export const llmConfig = {
   // Cloudflare Workers AI model IDs (the `@cf/...` namespace).
-  // candidate = lightweight selection model, answer = high-quality model.
+  // Both default to the lightweight 8B model to conserve the Workers AI free
+  // tier (Neurons); set LLM_ANSWER_MODEL to a larger model for higher quality.
   candidateModel:
     process.env.LLM_CANDIDATE_MODEL ?? "@cf/meta/llama-3.1-8b-instruct-fast",
   answerModel:
-    process.env.LLM_ANSWER_MODEL ?? "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    process.env.LLM_ANSWER_MODEL ?? "@cf/meta/llama-3.1-8b-instruct-fast",
   embeddingModel: process.env.LLM_EMBEDDING_MODEL ?? "@cf/baai/bge-m3",
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
   apiToken: process.env.CLOUDFLARE_AI_API_TOKEN,

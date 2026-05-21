@@ -157,7 +157,7 @@
 | 領域 | 採用 | 理由 |
 |---|---|---|
 | **Framework** | Next.js 16（既存維持）| Cloudflare Workers（OpenNext）デプロイ前提、breaking changes は AGENTS.md 参照 |
-| **LLM（候補抽出／回答生成）** | Cloudflare Workers AI: Llama 3.1 8B + Llama 3.3 70B | 無料枠あり、binding 不要の REST、Workers 本番と同一基盤（v4 で Gemini から切替） |
+| **LLM（候補抽出／回答生成）** | Cloudflare Workers AI: Llama 3.1 8B（軽量モデルに統一）| 無料枠（Neurons）を抑える。高品質が要れば `LLM_ANSWER_MODEL` で上位モデルへ（v4 で Gemini から切替） |
 | **LLM（本番フェーズ判断）** | Workers AI 継続 or さくらの AI Engine | コンプラ要件次第。**LLM 設定は環境変数で抽象化** |
 | **Embedding** | Workers AI `@cf/baai/bge-m3`（多言語）| 後にさくらの multilingual-e5-large 検討 |
 | **ベクトル保存（初期）** | `documents/embeddings.json` + JS でコサイン計算 | 50〜数百件規模では pgvector 不要 |
@@ -180,7 +180,7 @@
   // lib/llm-config.ts
   export const llmConfig = {
     candidateModel: process.env.LLM_CANDIDATE_MODEL ?? '@cf/meta/llama-3.1-8b-instruct-fast',
-    answerModel: process.env.LLM_ANSWER_MODEL ?? '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+    answerModel: process.env.LLM_ANSWER_MODEL ?? '@cf/meta/llama-3.1-8b-instruct-fast',
     embeddingModel: process.env.LLM_EMBEDDING_MODEL ?? '@cf/baai/bge-m3',
     accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
     apiToken: process.env.CLOUDFLARE_AI_API_TOKEN,
