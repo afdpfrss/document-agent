@@ -224,6 +224,7 @@ EDITOR_EMAILS=alice@example.com,bob@example.com
   - PR 操作（`mcp:merge` スコープ）— `review_edit` / `merge_edit`
 - **認証**: OAuth 2.1（PKCE、ステートレス JWT）。`AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` 設定時に有効化。`MCP_ALLOWED_EMAIL_DOMAINS` / `MCP_ALLOWED_EMAILS` で組織内に限定する
 - **デモモード**: `MCP_DEMO_MODE=true` で `propose_edit` 系が作る PR に `[DEMO]` 接頭辞が付き、提案者≠承認者（SoD）チェックが非適用になる。同一アカウントで作成〜承認〜マージを実演できる（corpus CI と CODEOWNERS 承認は通常どおり必須）
+- **単独運用モード**: `MCP_SOLO_APPROVER_MODE=true` で `propose_edit` 系が作る PR に `solo-approver` ラベル・マーカーが付き、提案者≠承認者（SoD）チェックが非適用になる。文書の作成・承認・マージを 1 人で担う零細企業向け。デモモードと違い `[DEMO]` 接頭辞は付かず本番でも有効（corpus CI と CODEOWNERS 承認は通常どおり必須）
 
 設定項目は `.env.local.example` の「MCP コネクタ」節を参照。認証を有効化するまで公開デプロイしないこと（`lib/config-guard.ts` が本番では fail-secure に拒否する）。逐語マッチに失敗した編集が 1 件でもあれば PR は作られず、反映は人間レビューを経た PR でのみ行われる（自動マージなし）。
 

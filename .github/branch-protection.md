@@ -97,10 +97,34 @@ Settings → Branches → Add branch ruleset（または classic branch protecti
   全 PR が `demo` ラベル付きになり SoD が事実上無効化される。`[DEMO]` 接頭辞・
   `demo` ラベルが歯止め（デモ PR が常に可視）。
 
-## 6. MCP コネクタ側の環境変数
+## 6. 単独運用モード（零細企業向け）
+
+文書の作成・承認・マージを **1 人で担う零細企業**では、提案者≠承認者（SoD）を
+満たせる人員がいない。この場合 MCP コネクタの環境変数
+`MCP_SOLO_APPROVER_MODE=true` を設定する。
+
+- `propose_edit` / `propose_related_edit` / `ingest_documents` が作る PR に
+  `solo-approver` ラベルと本文マーカー `<!-- poka-yoke:solo-approver -->` が付く。
+- separation-of-duties チェックはこの印を見て **SoD を非適用**（success）にし、
+  作成者本人の承認でマージできるようにする。
+- **緩和されるのは SoD のみ**。`validate` / `typecheck` と CODEOWNERS 承認は
+  通常どおり必須 — 作成者は対象カテゴリの CODEOWNERS かつ `MERGER_EMAILS`
+  登録にしておくこと。
+- **デモモード（§5）との違い**:
+  - `[DEMO]` 接頭辞・`demo` ラベルは付かない。デモではなく正規の編集 PR のため。
+  - 本番でも有効。本番ガード（`productionGuardActive`）で打ち消さない —
+    零細企業の正規の運用形態だから。デモモードは本番で強制無効化される。
+  - 代わりに `lib/config-guard.ts` が起動時に「SoD が無効化されている」ことを
+    `[config-guard]` 警告ログで可視化する。設定の存在自体が歯止め。
+- **複数人で文書を運用できるようになったら未設定に戻すこと**。SoD は
+  ヒューマンエラーを構造的に防ぐ柱（柱3）なので、承認できる人員が揃ったら
+  有効化するのが望ましい。
+
+## 7. MCP コネクタ側の環境変数
 
 | 変数 | 用途 |
 |---|---|
 | `EDITOR_EMAILS` | `mcp:edit` を付与（propose_edit / propose_related_edit） |
 | `MERGER_EMAILS` | `mcp:merge` を付与（merge_edit） |
 | `MCP_DEMO_MODE` | `true` でデモモード（§5）。本番は未設定 |
+| `MCP_SOLO_APPROVER_MODE` | `true` で単独運用モード（§6）。零細企業向けに SoD を非適用にする |
