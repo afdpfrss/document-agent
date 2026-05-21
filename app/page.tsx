@@ -14,7 +14,7 @@ export default function Home() {
                 社内ドキュメント検索
               </h1>
               <p className="text-xs text-slate-500 leading-tight">
-                Powered by Gemini Flash
+                Powered by Cloudflare Workers AI
               </p>
             </div>
           </div>

@@ -1,8 +1,8 @@
 // propose_edit MCP tool logic (v2 design Phase 3, §4-D / §4-E / §10).
 //
 // The caller's Claude generates structured {find, replace, reason} edits — the
-// MCP tool input_schema enforces that shape, the structured-output equivalent
-// of Gemini's responseSchema. The server applies them verbatim with
+// MCP tool input_schema enforces that shape, the same role the json_schema
+// response format plays for the web app. The server applies them verbatim with
 // edit-schema.applyEdits() and, if every edit matches cleanly, opens a GitHub
 // PR via github.proposeEdit(). Human review happens on the PR (no auto-merge,
 // docs/v2-design.md §10).
