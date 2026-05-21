@@ -93,8 +93,8 @@ body {
 /* Persistent mark on the exact passage a chat citation points to. Stays
    visible (no fade) so the reader can see what the answer drew on. */
 .doc-clause-mark {
-  background: var(--brand-soft);
-  box-shadow: 0 0 0 5px var(--brand-soft);
+  background: #c7d2fe;
+  box-shadow: 0 0 0 5px #c7d2fe;
   border-radius: 3px;
   animation: doc-clause-mark-in 0.5s ease-out;
 }
