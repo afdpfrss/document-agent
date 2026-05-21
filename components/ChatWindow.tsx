@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { DocumentReference, type SearchSource } from "./DocumentReference";
 import { rehypeMergedCells } from "@/lib/rehype-merged-cells";
+import { BUILD_NUMBER, BUILD_DATE } from "@/lib/build-info";
 import {
   CHAT_HEADINGS,
   CHAT_SUBTITLES,
@@ -328,6 +329,9 @@ export function ChatWindow() {
         </form>
         <p className="text-xs text-slate-400 mt-2 text-center">
           回答はAI（Gemini）が生成しています。重要事項は必ず原文を確認してください。
+        </p>
+        <p className="text-[11px] text-slate-400 mt-1 text-center">
+          Build {BUILD_NUMBER}（{BUILD_DATE}）
         </p>
       </div>
     </div>
