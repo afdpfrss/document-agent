@@ -7,7 +7,6 @@ const NAV_ITEMS = [
   { href: "/", label: "チャット" },
   { href: "/documents", label: "文書一覧" },
   { href: "/upload", label: "アップロード" },
-  { href: "/pr", label: "文書履歴" },
 ] as const;
 
 export function SiteNav() {

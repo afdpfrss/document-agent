@@ -3,6 +3,7 @@
 // instead of a 500 so the page is safe to link from the global nav.
 
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import {
   isGithubConfigured,
   listOpenPullRequests,
@@ -14,6 +15,9 @@ import { requireUser, UnauthenticatedError } from "@/lib/auth-helpers";
 export const dynamic = "force-dynamic";
 
 export default async function PrListPage() {
+  // 文書履歴ページは一旦非公開（404）。再公開時はこのブロックとナビ項目を戻す。
+  notFound();
+
   try {
     await requireUser();
   } catch (e) {
