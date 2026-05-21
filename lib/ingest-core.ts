@@ -13,7 +13,8 @@
 // Heavy converters (mammoth, pdfjs-dist, xlsx, turndown) are loaded lazily so
 // we only pay for the formats actually used in a given invocation.
 
-import { llmConfig } from "./llm-config";
+import { isLlmConfigured, llmConfig } from "./llm-config";
+import { runJson } from "./workers-ai";
 import { friendlyLlmError } from "./llm-errors";
 import type { DocumentMeta } from "./document-utils";
 
@@ -270,24 +271,28 @@ export interface GenerateFrontmatterOptions {
   hintTitle?: string;
 }
 
+const FRONTMATTER_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string", description: "ドキュメントのタイトル（30字以内）" },
+    category: { type: "string", description: "カテゴリ候補から1つ" },
+    keywords: {
+      type: "array",
+      items: { type: "string" },
+      description: "検索キーワード（最大8件）",
+    },
+    summary: { type: "string", description: "本文の要約（80〜200字）" },
+  },
+  required: ["title", "category", "keywords", "summary"],
+} as const;
+
 export async function generateFrontmatterWithLlm(
   opts: GenerateFrontmatterOptions,
 ): Promise<FrontmatterMeta> {
-  const apiKey = llmConfig.apiKey;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
-  const { GoogleGenerativeAI } = await import("@google/generative-ai");
-  const client = new GoogleGenerativeAI(apiKey);
-  const model = client.getGenerativeModel({
-    model: llmConfig.candidateModel,
-    generationConfig: {
-      temperature: 0.1,
-      responseMimeType: "application/json",
-      maxOutputTokens: 512,
-    },
-  });
+  if (!isLlmConfigured()) throw new Error("Workers AI is not configured");
 
-  // 8 KB body sample is enough for metadata extraction and stays inside the
-  // lite model's free-tier sweet spot.
+  // 8 KB body sample is enough for metadata extraction and keeps the
+  // candidate-model call small.
   const truncated = opts.body.slice(0, 8000);
   const prompt = `次の社内ドキュメントの本文を読み、フロントマターのメタデータを JSON で生成してください。
 
@@ -305,9 +310,22 @@ ${opts.knownCategories.map((c) => `- ${c}`).join("\n")}
 ${opts.hintTitle ? `# 参考: ファイル名由来のタイトル候補\n${opts.hintTitle}\n\n` : ""}# 本文（最初の${truncated.length}文字）
 ${truncated}`;
 
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
-  const parsed = JSON.parse(extractJson(text)) as Partial<FrontmatterMeta>;
+  const res = await runJson<Partial<FrontmatterMeta>>({
+    model: llmConfig.candidateModel,
+    messages: [
+      {
+        role: "system",
+        content:
+          "あなたは社内ドキュメントのメタデータを生成するアシスタントです。",
+      },
+      { role: "user", content: prompt },
+    ],
+    schema: FRONTMATTER_SCHEMA,
+    temperature: 0.1,
+    maxTokens: 1024,
+  });
+
+  const parsed = res.data ?? {};
   let category = String(parsed.category ?? "その他業務ガイド");
   if (opts.knownCategories.length > 0 && !opts.knownCategories.includes(category)) {
     category = "その他業務ガイド";
@@ -321,14 +339,6 @@ ${truncated}`;
     keywords,
     summary: String(parsed.summary ?? ""),
   };
-}
-
-function extractJson(text: string): string {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const raw = fenced ? fenced[1] : text;
-  const start = raw.search(/[\[{]/);
-  if (start < 0) throw new Error(`No JSON in model output: ${text.slice(0, 200)}`);
-  return raw.slice(start).trim();
 }
 
 // ---------- frontmatter writer ----------
@@ -443,7 +453,7 @@ export async function buildPreview(opts: BuildPreviewOptions): Promise<IngestPre
   let meta: FrontmatterMeta;
   let metaSource: "llm" | "fallback" = "llm";
   let metaError: string | undefined;
-  if (opts.useLlm === false || !llmConfig.apiKey) {
+  if (opts.useLlm === false || !isLlmConfigured()) {
     meta = {
       title: hintTitle,
       category: opts.forceCategory ?? "その他業務ガイド",
@@ -451,7 +461,7 @@ export async function buildPreview(opts: BuildPreviewOptions): Promise<IngestPre
       summary: "",
     };
     metaSource = "fallback";
-    if (opts.useLlm !== false && !llmConfig.apiKey) {
+    if (opts.useLlm !== false && !isLlmConfigured()) {
       metaError = "サーバーの設定が完了していません。管理者にお問い合わせください。";
     }
   } else {

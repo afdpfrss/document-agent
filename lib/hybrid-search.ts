@@ -16,8 +16,8 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
-import { GoogleGenerativeAI, TaskType } from "@google/generative-ai";
-import { llmConfig, requireApiKey } from "./llm-config";
+import { embed } from "./workers-ai";
+import { isLlmConfigured, llmConfig } from "./llm-config";
 
 interface EmbeddingItem {
   doc_id: string;
@@ -95,26 +95,22 @@ export async function vectorSearch(
     // No index → caller falls back to metadata-only Step 1.
     return null;
   }
-  const apiKey = llmConfig.apiKey;
-  if (!apiKey) {
-    // Can't embed without a key — fail soft so the rest of Step 1 still runs.
-    // (Step 1 itself will surface the "no key" error later if needed.)
+  if (!isLlmConfigured()) {
+    // Can't embed without Workers AI credentials — fail soft so the rest of
+    // Step 1 still runs on metadata alone.
     return null;
   }
-  const client = new GoogleGenerativeAI(requireApiKey());
+  // Embed the query with the exact model recorded in the embeddings file, so
+  // the query and index vectors always come from the same model.
   const modelName = loaded.data.model || llmConfig.embeddingModel;
-  const model = client.getGenerativeModel({ model: modelName });
 
   let queryVec: number[];
   try {
-    const res = await model.embedContent({
-      content: { role: "user", parts: [{ text: query }] },
-      taskType: TaskType.RETRIEVAL_QUERY,
-    });
-    queryVec = res.embedding.values;
+    const [vec] = await embed([query], modelName);
+    queryVec = vec ?? [];
   } catch (e) {
     console.warn(
-      "[hybrid-search] embedContent failed, falling back to metadata-only:",
+      "[hybrid-search] embed failed, falling back to metadata-only:",
       e instanceof Error ? e.message : e,
     );
     return null;
@@ -138,8 +134,8 @@ export async function vectorSearch(
 }
 
 // Renders top-k vector hits as a prompt block. Kept here (rather than inlined
-// into gemini-search) so the block format stays close to the data shape and
-// can be unit-tested without spinning up the whole search pipeline.
+// into search.ts) so the block format stays close to the data shape and can
+// be unit-tested without spinning up the whole search pipeline.
 export function renderVectorBlock(hits: VectorHit[]): string {
   if (hits.length === 0) return "";
   const lines = hits.map(
