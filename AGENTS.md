@@ -18,6 +18,7 @@ This repository is transitioning from **v1 (legacy)** to **v2 (hybrid document a
 - メタデータ駆動が主、ベクトルは補助（段階的開示の構造を壊さない）
 - AI 編集は必ず `{find, replace, reason}` 構造化 + 人間レビュー必須
 - LLM はモデル名・API キーを環境変数化（さくら等への将来切替余地を残す）
-- 開発フェーズはダミーデータ前提、Gemini 無料枠を使う
+- LLM プロバイダは Cloudflare Workers AI（v4 で Gemini から全面切替。`lib/workers-ai.ts`）
+- 開発フェーズはダミーデータ前提、Workers AI 無料枠を使う
 - ベクトル DB / DB 永続化 / 全文再生成型編集は採用しない（理由は §10）
 - 開発・動作確認は `MCP_DEMO_MODE=true`（デモモード）前提。デモ PR は `[DEMO]` 付きで SoD（提案者≠承認者）が非適用になり、同一アカウントで作成〜承認〜マージできる。corpus CI（文書整合性）と型チェックはデモモードでも有効。詳細は `.github/branch-protection.md`

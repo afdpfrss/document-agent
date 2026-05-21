@@ -99,7 +99,7 @@
 
 | 項目 | 主要要素 | 確定度 |
 |---|---|---|
-| プロンプトキャッシュ | Gemini Context Caching。Step1 で index.json をキャッシュ。暗黙的→明示的の順 | 導入意向 |
+| プロンプトキャッシュ | （v4 で見送り）Workers AI にコンテキストキャッシュ製品はない | 見送り |
 | 無料生成 AI 埋め込み | Groq + Llama / Ollama。**オンプレ要件 or 取り込み軽処理用途** に限定検討 | 条件付き |
 
 ### D. チャットベース文書編集機能
@@ -107,7 +107,7 @@
 | 項目 | 主要要素 | 確定度 |
 |---|---|---|
 | 権限管理 | viewer / proposer / approver / admin の 4 ロール + カテゴリ別 | 導入意向 |
-| AI 編集指示生成 | `{find, replace, reason}[]` 構造化出力（Gemini responseSchema 活用）| 導入意向 |
+| AI 編集指示生成 | `{find, replace, reason}[]` 構造化出力（Workers AI json_schema 活用）| 導入意向 |
 | 差分提示 + 手動編集 UI | Monaco DiffEditor、画面上で差分自体を編集可能 | 導入意向 |
 | 承認フロー | ドラフト → 承認 → 反映 + 監査ログ（commit log で代用）| 導入意向 |
 
@@ -128,7 +128,7 @@
 - **エンドポイント**: `app/api/mcp/route.ts`（Next.js ルートハンドラ）。公式 SDK `@modelcontextprotocol/sdk` + Streamable HTTP トランスポートで実装。
 - **ツール**: `search_documents`（候補プール）/ `get_sections`（セクション本文）/ `list_categories`（カテゴリ一覧）/ `propose_edit`（構造化編集 `{find, replace, reason}[]` を逐語適用し branch + PR を作成）。`propose_edit` は MCP の input_schema で編集構造を強制（Gemini の responseSchema の代替）し、`mcp:edit` スコープを要求。逐語マッチに失敗した編集が 1 件でもあれば PR を作らず診断を返す。反映は GitHub の PR レビューで（自動マージなし、§10 整合）。
 - **段階的開示の維持**: サーバはクエリ時に回答生成 LLM を呼ばない。各ツールが返す情報量を絞る（フロントマター → セクション本文）ことで §3 の段階的開示構造をツール境界上で保つ。
-- **ベクトル検索**: クエリ埋め込みのみ Gemini を使用。`GEMINI_API_KEY` 未設定時はメタデータ駆動のみへ自動フォールバック（既存 `lib/hybrid-search.ts` の挙動を流用）。
+- **ベクトル検索**: クエリ埋め込みは Workers AI（`@cf/baai/bge-m3`）を使用。認証情報（`CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_AI_API_TOKEN`）未設定時はメタデータ駆動のみへ自動フォールバック（`lib/hybrid-search.ts` の挙動）。
 - **疎結合**: ツール実装（`lib/mcp/`）は既存の `lib/` モジュール（`document-utils` / `hybrid-search` / `edit-schema` / `github`）を import するだけにとどめ、既存の Gemini チャットパイプラインと共存させる。
 - **認証（OAuth 2.1）**: `/api/mcp` は OAuth 2.1 のリソースサーバとして保護されると同時に、最小限の認可サーバも兼ねる。クライアント（claude.ai のカスタムコネクタ等）は動的クライアント登録 → authorization code + PKCE(S256) フローでトークンを取得する。実ユーザー認証は既存 `auth.ts`（NextAuth + Google OIDC）に委譲し、社内ユーザーのみを allowlist（`MCP_ALLOWED_EMAIL_DOMAINS` / `MCP_ALLOWED_EMAILS`）で許可する。アクセストークン・リフレッシュトークン・認可コード・client_id はすべて `AUTH_SECRET` で署名した HS256 JWT で表現し、DB を使わない（§10 整合。認可コードの単回使用のみプロセス内メモリでベストエフォート保証）。エンドポイント: `/.well-known/oauth-protected-resource`・`/.well-known/oauth-authorization-server`・`/api/mcp/oauth/{register,authorize,token}`。アプリ全体の認証が OFF の開発時はトークン不要（Phase 1 と同じ挙動）。認証が有効になるまで公開デプロイしない。
 
@@ -156,14 +156,14 @@
 
 | 領域 | 採用 | 理由 |
 |---|---|---|
-| **Framework** | Next.js 16（既存維持）| Vercel デプロイ前提、breaking changes は AGENTS.md 参照 |
-| **LLM（開発フェーズ）** | Gemini 2.5 Flash + Flash-Lite | 無料枠 45,000 req/月、長文コンテキスト、既存実装 |
-| **LLM（本番フェーズ判断）** | Gemini 有料 or さくらの AI Engine | コンプラ要件次第。**LLM 設定は環境変数で抽象化** |
-| **Embedding** | Gemini text-embedding-004（暫定）| 後にさくらの multilingual-e5-large 検討 |
+| **Framework** | Next.js 16（既存維持）| Cloudflare Workers（OpenNext）デプロイ前提、breaking changes は AGENTS.md 参照 |
+| **LLM（候補抽出／回答生成）** | Cloudflare Workers AI: Llama 3.1 8B + Llama 3.3 70B | 無料枠あり、binding 不要の REST、Workers 本番と同一基盤（v4 で Gemini から切替） |
+| **LLM（本番フェーズ判断）** | Workers AI 継続 or さくらの AI Engine | コンプラ要件次第。**LLM 設定は環境変数で抽象化** |
+| **Embedding** | Workers AI `@cf/baai/bge-m3`（多言語）| 後にさくらの multilingual-e5-large 検討 |
 | **ベクトル保存（初期）** | `documents/embeddings.json` + JS でコサイン計算 | 50〜数百件規模では pgvector 不要 |
 | **ベクトル保存（拡張）** | pgvector（Supabase）| 500 件超で移行 |
 | **差分エディタ** | `@monaco-editor/react`（DiffEditor）| VS Code 同等、左右編集可 |
-| **編集指示生成** | Gemini `responseSchema` で `{find, replace, reason}[]` 強制 | 型安全な構造化出力 |
+| **編集指示生成** | Workers AI の `response_format: json_schema` で `{find, replace, reason}[]` 強制 | 型安全な構造化出力 |
 | **永続化** | GitHub（Octokit）| PR 承認 = 編集承認、CODEOWNERS = カテゴリ別承認者 |
 | **認証（Phase 2 以降）** | Auth.js（NextAuth）+ Google OIDC | 社内利用想定 |
 | **同時編集制御** | 楽観ロック（branch 名 + version）| Git の merge 機構を活用 |
@@ -173,18 +173,20 @@
 ## 7. LLM 戦略（開発 → 本番）
 
 ### 開発フェーズ（現在）
-- **Gemini 無料枠で開始**：ダミーデータ前提、データ学習利用問題なし
+- **Cloudflare Workers AI（無料枠）で稼働**：候補抽出・回答生成・編集提案・埋め込みのすべて。ダミーデータ前提。
+- **REST API 経由**：`AI` binding ではなく REST を使い、`next dev`・Workers 本番・Node スクリプトで同一コードを動かす（`lib/workers-ai.ts`）。
 - **抽象化レイヤを薄く張る**：
   ```ts
-  // lib/llm-config.ts（実装時に作成）
+  // lib/llm-config.ts
   export const llmConfig = {
-    candidateModel: process.env.LLM_CANDIDATE_MODEL ?? 'gemini-2.5-flash-lite',
-    answerModel: process.env.LLM_ANSWER_MODEL ?? 'gemini-2.5-flash',
-    embeddingModel: process.env.LLM_EMBEDDING_MODEL ?? 'text-embedding-004',
-    apiKey: process.env.GEMINI_API_KEY!,
-  };
+    candidateModel: process.env.LLM_CANDIDATE_MODEL ?? '@cf/meta/llama-3.1-8b-instruct-fast',
+    answerModel: process.env.LLM_ANSWER_MODEL ?? '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+    embeddingModel: process.env.LLM_EMBEDDING_MODEL ?? '@cf/baai/bge-m3',
+    accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+    apiToken: process.env.CLOUDFLARE_AI_API_TOKEN,
+  } as const;
   ```
-- これでモデル切替・本番移行時にコード変更を最小化
+- これでモデル切替・プロバイダ移行時にコード変更を最小化（プロバイダ実体の差し替えは `lib/workers-ai.ts` に閉じる）
 
 ### 本番フェーズ（移行判断）
 以下のいずれかが該当した場合は**さくらの AI Engine（国内 DC）も候補**：
@@ -192,7 +194,7 @@
 - 顧客から国内処理証明を求められる
 - 規制業界（金融・自治体・医療）向け展開
 
-該当しない場合は **Gemini 有料へのキー差替えのみ**で本番移行。
+該当しない場合は **Workers AI のまま**本番移行（モデル ID と認証情報は環境変数で差し替え可能）。
 
 ---
 
@@ -220,7 +222,7 @@ claude/summarize-infocraft-X2M5v  ← v2 設計議論・本ドキュメント追
 - [ ] `AGENTS.md` の Next.js v16 注意書きを読む
 - [ ] `README.md` で旧アイディアの構成を理解
 - [ ] `documents/index.json` のフロントマター構造を把握
-- [ ] `lib/gemini-search.ts` の段階的検索ロジックを把握（v2 でも基本構造は流用）
+- [ ] `lib/search.ts` の段階的検索ロジックを把握（v2 でも基本構造は流用）
 - [ ] 着手するフェーズを §5 から 1 つ選び、単独で価値が出る形に分割する
 - [ ] LLM 設定の環境変数化を最初に済ませる（後から面倒）
 
@@ -233,9 +235,10 @@ claude/summarize-infocraft-X2M5v  ← v2 設計議論・本ドキュメント追
 - ❌ ベクトル DB を最初から導入（pgvector / Pinecone 等）→ 件数増加時に移行
 - ❌ 全文再生成型の AI 編集（必ず `{find, replace}` 構造化）
 - ❌ 自動マージ（AI 提案 → 人間レビュー必須）
-- ❌ ChatGPT API への乗り換え（コスト効率で Gemini 優位、変える理由なし）
-- ❌ 無料 OSS LLM への置換（現規模では不要、品質劣化リスクが上回る）
+- ❌ プロプライエタリ LLM API への依存（v4 で Cloudflare Workers AI に全面切替。下記補足を参照）
 - ❌ DB（Postgres 等）で文書本体を管理（GitHub バックエンドが第一選択）
+
+> **v4 補足（LLM プロバイダ切替）**: 当初この §10 は「無料 OSS LLM への置換」を見送るとしていたが、v4 で方針転換し、LLM 層を Google Gemini から Cloudflare Workers AI（Llama 3.x / bge-m3）へ全面切替した。理由は、Workers 本番基盤と同一プロバイダで運用が単純化し、無料枠で開発が完結すること。段階的開示・構造化編集・人間レビュー必須・GitHub バックエンドといった他の原則は変更なし。モデル ID とプロバイダ実体は環境変数 + `lib/workers-ai.ts` に隔離し、さくらの AI Engine 等への将来切替余地は維持している。
 
 ---
 
