@@ -127,7 +127,14 @@ function csvToMarkdownTable(csv: string): string {
   const padded = rows.map((r) => {
     const out = r.slice();
     while (out.length < width) out.push("");
-    return out.map((c) => c.replace(/\|/g, "\\|").replace(/\n/g, " "));
+    // A GFM row must stay on one physical line: escape pipes, and turn any
+    // in-cell line break (Excel Alt+Enter survives CSV quoting as CRLF/CR/LF)
+    // into a literal "<br>". rehypeMergedCells renders those back as real
+    // breaks; collapsing them to spaces would fuse a multi-line cell into
+    // one run-on line.
+    return out.map((c) =>
+      c.replace(/\|/g, "\\|").replace(/\r\n|\r|\n/g, "<br>"),
+    );
   });
   const header = padded[0];
   const body = padded.slice(1);
