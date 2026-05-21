@@ -283,6 +283,11 @@ export function ChatWindow() {
           <MessageBubble
             key={i}
             message={m}
+            question={
+              m.role === "assistant" && messages[i - 1]?.role === "user"
+                ? messages[i - 1].content
+                : undefined
+            }
             disabled={loading}
             onFollowup={submit}
           />
@@ -326,10 +331,13 @@ export function ChatWindow() {
 
 function MessageBubble({
   message,
+  question,
   disabled,
   onFollowup,
 }: {
   message: ChatMessage;
+  // The user question that produced this answer — forwarded to citations.
+  question?: string;
   disabled: boolean;
   onFollowup: (question: string, focus?: FollowupContext) => void;
 }) {
@@ -372,7 +380,7 @@ function MessageBubble({
               )}
             </div>
             {message.sources && message.sources.length > 0 && (
-              <DocumentReference sources={message.sources} />
+              <DocumentReference sources={message.sources} question={question} />
             )}
             {!message.streaming &&
               message.followups &&

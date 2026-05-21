@@ -94,6 +94,15 @@ body {
   transition: background-color 0.4s ease-out, border-color 0.4s ease-out;
 }
 
+/* Highlight a specific 条/項 inside a section when a chat citation deep-links
+   to it — DocViewer resolves the closest match to the ?q= question. */
+.doc-clause-highlight {
+  background: var(--brand-soft);
+  border-radius: 4px;
+  box-shadow: 0 0 0 6px var(--brand-soft);
+  transition: background-color 0.4s ease-out, box-shadow 0.4s ease-out;
+}
+
 /* Streaming indicators */
 .streaming-caret {
   display: inline-block;

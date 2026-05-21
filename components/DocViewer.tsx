@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { DocumentMeta } from "@/lib/document-utils";
 import { rehypeMergedCells } from "@/lib/rehype-merged-cells";
+import { sectionScore } from "@/lib/text-score";
 
 interface Props {
   doc: DocumentMeta;
@@ -22,14 +23,44 @@ export function DocViewer({ doc, sections, canEdit = false }: Props) {
   // section element exists. Re-trigger the scroll + brief highlight so the user
   // sees where they landed. Keyed on doc.id so it also re-runs on in-app
   // navigation between two /docs/[id] routes (which reuse this component).
+  //
+  // A chat citation link may also carry the original question as ?q=. When it
+  // does, we don't stop at the section top — each 条/項 (rendered as <p>/<li>)
+  // in the section is scored against the question with the same bigram metric
+  // the server uses to rank sections, and we land on the closest paragraph.
   useEffect(() => {
     const hash = window.location.hash.slice(1);
     if (!hash) return;
-    const el = document.getElementById(hash);
-    if (!el) return;
-    el.scrollIntoView({ behavior: "auto", block: "start" });
-    el.classList.add("doc-section-highlight");
-    const t = setTimeout(() => el.classList.remove("doc-section-highlight"), 1800);
+    const sectionEl = document.getElementById(hash);
+    if (!sectionEl) return;
+
+    const q = new URLSearchParams(window.location.search).get("q") ?? "";
+    let target: Element = sectionEl;
+    let highlightClass = "doc-section-highlight";
+
+    if (q) {
+      const candidates = Array.from(sectionEl.querySelectorAll("li, p"));
+      let best: Element | null = null;
+      let bestScore = 0;
+      for (const el of candidates) {
+        const score = sectionScore(q, el.textContent ?? "");
+        if (score > bestScore) {
+          bestScore = score;
+          best = el;
+        }
+      }
+      if (best) {
+        target = best;
+        highlightClass = "doc-clause-highlight";
+      }
+    }
+
+    target.scrollIntoView({
+      behavior: "auto",
+      block: target === sectionEl ? "start" : "center",
+    });
+    target.classList.add(highlightClass);
+    const t = setTimeout(() => target.classList.remove(highlightClass), 1800);
     return () => clearTimeout(t);
   }, [doc.id]);
 
