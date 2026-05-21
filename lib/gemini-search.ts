@@ -9,7 +9,6 @@ import { llmConfig, requireApiKey } from "./llm-config";
 import { renderVectorBlock, vectorSearch } from "./hybrid-search";
 import { getOrCreateStep1Cache, STEP1_SYSTEM_INSTRUCTION } from "./prompt-cache";
 import { OFFTOPIC_FALLBACK_INSTRUCTION, PERSONA_INSTRUCTION } from "./persona";
-import { pickIntro } from "./intro-phrases";
 
 export interface ChatTurn {
   role: "user" | "assistant";
@@ -521,19 +520,14 @@ async function* runFallback(
   yield { type: "done" };
 }
 
-// Concrete path: announce the search, pause briefly with dots, then stream the
-// answer body. The intermission + small delay guarantees the second-phase
-// loading dots are visible even when Step 3's first chunk lands fast.
+// Concrete path: read the section bodies and stream the answer. The loading
+// dots stay visible from submit until the first body chunk lands.
 async function* runConcreteAnswer(
   question: string,
   language: string,
   blocks: AnswerBlock[],
   history: ChatTurn[] | undefined,
 ): AsyncGenerator<SearchEvent> {
-  yield { type: "delta", text: "\n\n検索開始です。" };
-  yield { type: "intermission" };
-  await new Promise((r) => setTimeout(r, 450));
-
   const sources: SearchSource[] = blocks.map((b) => ({
     doc_id: b.doc.id,
     title: b.doc.title,
@@ -542,8 +536,7 @@ async function* runConcreteAnswer(
     section_titles: b.sections.map((s) => s.title),
   }));
 
-  // Step 3 generates the body only (no 一言, no marker). Prefix a paragraph
-  // break so the body renders cleanly below the announcement.
+  // Step 3 generates the body only (no 一言, no marker).
   let bodyStarted = false;
   let followups: string[] = [];
   const gen = splitFollowups(step3StreamAnswer(question, language, blocks, history));
@@ -559,7 +552,7 @@ async function* runConcreteAnswer(
     }
     if (!bodyStarted) {
       bodyStarted = true;
-      yield { type: "delta", text: "\n\n" + value.replace(/^\s+/, "") };
+      yield { type: "delta", text: value.replace(/^\s+/, "") };
     } else {
       yield { type: "delta", text: value };
     }
@@ -603,7 +596,7 @@ async function* runAbstractReply(
     }
     if (!bodyStarted) {
       bodyStarted = true;
-      yield { type: "delta", text: "\n\n" + value.replace(/^\s+/, "") };
+      yield { type: "delta", text: value.replace(/^\s+/, "") };
     } else {
       yield { type: "delta", text: value };
     }
@@ -654,12 +647,6 @@ export async function* searchDocumentsStream(
 ): AsyncGenerator<SearchEvent> {
   const index = await loadIndex();
 
-  // 受け止めの一言はルールベースのプリセットから即決定する（旧 generateIntro の
-  // Gemini 呼び出しを廃止）。LLM 待ちが消えるので Step 1 と直列にしても遅延は
-  // 増えない。
-  const intro = pickIntro(question);
-  yield { type: "delta", text: intro };
-
   // Carry path: a drill-down chip click sends the previous turn's candidate
   // doc ids. The follow-up is already a concrete question, so Step 1 is
   // skipped — go straight to section selection within those documents. If the
@@ -693,9 +680,8 @@ export async function* searchDocumentsStream(
   );
 
   if (candidateDocs.length === 0) {
-    // Off-topic / no usable docs: skip the "検索開始です。" announcement
-    // since we're not actually searching anymore. Brief intermission, then
-    // a persona-style fallback reply.
+    // Off-topic / no usable docs: brief intermission, then a persona-style
+    // fallback reply.
     yield { type: "intermission" };
     await new Promise((r) => setTimeout(r, 300));
     yield* runFallback(question, language, history);
