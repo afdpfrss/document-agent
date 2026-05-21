@@ -283,25 +283,84 @@ export function injectSectionMarkers(body) {
   return { body: out.join("\n"), sections };
 }
 
-// ---------- LLM frontmatter ----------
+// ---------- LLM frontmatter (Cloudflare Workers AI) ----------
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const FRONTMATTER_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string", description: "ドキュメントのタイトル（30字以内）" },
+    category: { type: "string", description: "カテゴリ候補から1つ" },
+    keywords: {
+      type: "array",
+      items: { type: "string" },
+      description: "検索キーワード（最大8件）",
+    },
+    summary: { type: "string", description: "本文の要約（80〜200字）" },
+  },
+  required: ["title", "category", "keywords", "summary"],
+};
+
+// POST a json_schema-constrained chat completion to Workers AI. Retries 429
+// and 5xx with exponential backoff. Returns the raw `result.response`.
+async function workersAiJson({ accountId, apiToken, model, system, user, schema }) {
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`;
+  for (let attempt = 0; ; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+          response_format: { type: "json_schema", json_schema: schema },
+          temperature: 0.1,
+          max_tokens: 1024,
+        }),
+      });
+    } catch (err) {
+      if (attempt < 4) {
+        await sleep(2000 * 2 ** attempt);
+        continue;
+      }
+      throw err;
+    }
+    if (res.ok) {
+      const json = await res.json();
+      if (!json.success) {
+        throw new Error(`Workers AI error: ${JSON.stringify(json.errors)}`);
+      }
+      return json.result.response;
+    }
+    const retryable = res.status === 429 || res.status >= 500;
+    const detail = await res.text().catch(() => "");
+    if (retryable && attempt < 4) {
+      console.warn(`  Workers AI HTTP ${res.status}, retrying…`);
+      await sleep(2000 * 2 ** attempt);
+      continue;
+    }
+    throw new Error(`Workers AI HTTP ${res.status}: ${detail.slice(0, 200)}`);
+  }
+}
 
 async function generateFrontmatterWithLlm({ body, knownCategories, hintTitle }) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
-  const { GoogleGenerativeAI } = await import("@google/generative-ai");
-  const client = new GoogleGenerativeAI(apiKey);
-  const model = client.getGenerativeModel({
-    model: process.env.LLM_CANDIDATE_MODEL ?? "gemini-2.5-flash-lite",
-    generationConfig: {
-      temperature: 0.1,
-      responseMimeType: "application/json",
-      maxOutputTokens: 512,
-    },
-  });
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const apiToken = process.env.CLOUDFLARE_AI_API_TOKEN;
+  if (!accountId || !apiToken) {
+    throw new Error("CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_AI_API_TOKEN is not set");
+  }
+  const model =
+    process.env.LLM_CANDIDATE_MODEL ?? "@cf/meta/llama-3.1-8b-instruct-fast";
 
   // 8 KB body sample is more than enough for metadata extraction and keeps
-  // us inside the lite model's free-tier sweet spot. Larger files would
-  // burn tokens for diminishing accuracy gains here.
+  // the candidate-model call small.
   const truncated = body.slice(0, 8000);
   const prompt = `次の社内ドキュメントの本文を読み、フロントマターのメタデータを JSON で生成してください。
 
@@ -319,9 +378,15 @@ ${knownCategories.map((c) => `- ${c}`).join("\n")}
 ${hintTitle ? `# 参考: ファイル名由来のタイトル候補\n${hintTitle}\n\n` : ""}# 本文（最初の${truncated.length}文字）
 ${truncated}`;
 
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
-  const parsed = JSON.parse(extractJson(text));
+  const response = await workersAiJson({
+    accountId,
+    apiToken,
+    model,
+    system: "あなたは社内ドキュメントのメタデータを生成するアシスタントです。",
+    user: prompt,
+    schema: FRONTMATTER_SCHEMA,
+  });
+  const parsed = coerceJson(response);
   if (!knownCategories.includes(parsed.category)) {
     parsed.category = "その他業務ガイド";
   }
@@ -335,12 +400,16 @@ ${truncated}`;
   };
 }
 
-function extractJson(text) {
+// Workers AI returns json_schema output already parsed; older models return a
+// JSON string. Handle both, with a prose-extraction fallback.
+function coerceJson(response) {
+  if (response && typeof response === "object") return response;
+  const text = typeof response === "string" ? response : String(response ?? "");
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   const raw = fenced ? fenced[1] : text;
-  const start = raw.search(/[\[{]/);
+  const start = raw.search(/[[{]/);
   if (start < 0) throw new Error(`No JSON in model output: ${text.slice(0, 200)}`);
-  return raw.slice(start).trim();
+  return JSON.parse(raw.slice(start).trim());
 }
 
 // ---------- frontmatter writer ----------
