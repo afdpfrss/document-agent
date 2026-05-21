@@ -81,6 +81,19 @@ describe("productionConfigIssues", () => {
     ).toBe(true);
   });
 
+  it("flags MCP_SOLO_APPROVER_MODE in production for visibility", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("AUTH_GOOGLE_ID", "id");
+    vi.stubEnv("AUTH_GOOGLE_SECRET", "secret");
+    vi.stubEnv("MCP_ALLOWED_EMAILS", "a@example.com");
+    vi.stubEnv("MCP_SOLO_APPROVER_MODE", "true");
+    expect(
+      productionConfigIssues().some((i) =>
+        i.includes("MCP_SOLO_APPROVER_MODE"),
+      ),
+    ).toBe(true);
+  });
+
   it("notes when the escape hatch has disabled enforcement", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("AUTH_GOOGLE_ID", "");

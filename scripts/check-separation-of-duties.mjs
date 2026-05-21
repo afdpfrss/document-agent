@@ -25,6 +25,8 @@ const STATUS_CONTEXT = "poka-yoke / separation-of-duties";
 const PROPOSER_MARKER_RE = /<!--\s*poka-yoke:proposer=(\S+?)\s*-->/;
 const DEMO_MARKER_RE = /<!--\s*poka-yoke:demo\s*-->/;
 const DEMO_LABEL = "demo";
+const SOLO_APPROVER_MARKER_RE = /<!--\s*poka-yoke:solo-approver\s*-->/;
+const SOLO_APPROVER_LABEL = "solo-approver";
 const API = "https://api.github.com";
 
 const TOKEN = process.env.GITHUB_TOKEN;
@@ -83,6 +85,21 @@ async function main() {
     labels.includes(DEMO_LABEL) || DEMO_MARKER_RE.test(pr.body ?? "");
   if (isDemo) {
     await postStatus("success", "demo mode — SoD 非適用");
+    return;
+  }
+
+  // 単独運用モード（零細企業向け）: solo-approver ラベルまたは本文マーカーが
+  // あれば SoD 非適用。文書の作成・承認・マージを 1 人で担う零細企業向けの
+  // 正規の運用形態（MCP コネクタの MCP_SOLO_APPROVER_MODE）。デモモードと同じく
+  // 緩和されるのは SoD のみで、corpus CI と CODEOWNERS 承認は通常どおり必須。
+  const isSolo =
+    labels.includes(SOLO_APPROVER_LABEL) ||
+    SOLO_APPROVER_MARKER_RE.test(pr.body ?? "");
+  if (isSolo) {
+    await postStatus(
+      "success",
+      "単独運用モード — SoD 非適用（零細企業向け / 作成者の自己承認を許可）",
+    );
     return;
   }
 

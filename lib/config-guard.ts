@@ -49,9 +49,11 @@ function mcpAllowlistConfigured(): boolean {
   );
 }
 
-// Human-readable list of dangerous settings for the current environment.
-// Empty when the configuration is safe (or not in production). instrumentation.ts
-// logs these at server startup; SECURITY.md documents each one.
+// Human-readable list of dangerous (or otherwise noteworthy) settings for the
+// current environment — e.g. an intentional but security-relevant mode that an
+// operator should be able to see is active. Empty when the configuration is
+// safe (or not in production). instrumentation.ts logs these at server startup;
+// SECURITY.md documents each one.
 export function productionConfigIssues(): string[] {
   if (!isProduction() || isBuildPhase()) return [];
   const issues: string[] = [];
@@ -68,6 +70,11 @@ export function productionConfigIssues(): string[] {
   if (process.env.MCP_DEMO_MODE === "true") {
     issues.push(
       "MCP_DEMO_MODE=true が設定されています。本番では職務分掌（提案者≠承認者）チェックが無効化されます。",
+    );
+  }
+  if (process.env.MCP_SOLO_APPROVER_MODE === "true") {
+    issues.push(
+      "MCP_SOLO_APPROVER_MODE=true（単独運用モード）が設定されています。職務分掌（提案者≠承認者）チェックが無効化され、文書の作成者自身が承認・マージできます。文書を 1 人で運用する零細企業向けの正規モードです。複数人で運用する場合は無効化してください。",
     );
   }
 
