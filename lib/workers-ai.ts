@@ -205,7 +205,14 @@ function coerceJson<T>(response: unknown, model: string): T {
       200,
     );
   }
-  return JSON.parse(body.slice(start).trim()) as T;
+  try {
+    return JSON.parse(body.slice(start).trim()) as T;
+  } catch {
+    throw new WorkersAiError(
+      `Workers AI ${model} returned malformed JSON: ${text.slice(0, 200)}`,
+      200,
+    );
+  }
 }
 
 // Streaming text generation. Yields text deltas; the generator's return value
