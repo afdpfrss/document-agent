@@ -1,27 +1,27 @@
-// Pinpoint the 条/項 inside a document's sections that best answers a question.
+// Locate the passage of a document that best answers a question, and produce a
+// citation the chat can link to and the doc viewer can scroll to + mark.
 //
-// Search and section selection (lib/section-select.ts) work at 章 (section)
-// granularity — that is all the corpus marks with section_id. But a chat
-// citation should point a reader at the exact 条 (article) / 項 (paragraph),
-// not just the chapter. The .md files already carry that structure as plain
-// text (`**第N条(...)**` headers and `1.` / `2.` numbered 項), so we parse it
-// here at request time — no corpus change, no precomputed artifact — and
-// score each clause with the same bigram metric used everywhere else.
+// The corpus is multi-format: only the section (<!-- section_id -->) is a
+// guaranteed structural unit; below it, structure is arbitrary. So the link
+// target is plain text — the leading text of the cited passage, extended until
+// it is unique within the whole document, so the viewer's match is collision-
+// free regardless of format. 条/項 are detected best-effort, for display only.
 
 import { sectionScore } from "./text-score";
+import { loadAllSections } from "./document-utils";
 
-export interface ClauseLocation {
+export interface CitedLocation {
   section_id: string;
-  // The 章 heading, e.g. "第3章 機器貸与と費用負担".
+  // The 章 heading, e.g. "第3章 機器貸与と費用負担". Always present.
   section_title: string;
-  // The 条 header, e.g. "第13条(機器貸与)". Empty when the section carries no
-  // 条 structure — the citation then degrades to section granularity.
+  // The 条 header, e.g. "第13条(機器貸与)". Empty for documents with no 条
+  // structure — the citation then relies on section + quote alone.
   article: string;
-  // 1-based 項 number, or null when the 条 has no numbered 項.
+  // 1-based 項 number, or null.
   paragraph: number | null;
-  // Leading text of the cited clause. The doc viewer matches this against
-  // rendered DOM text to scroll to (and highlight) the exact clause. Empty
-  // for a section-level fallback.
+  // Leading text of the cited passage, guaranteed unique within the document.
+  // The viewer scrolls to and marks the element containing it; the card shows
+  // it as a quote. Empty only when no passage could be matched.
   snippet: string;
 }
 
@@ -46,17 +46,11 @@ const ARTICLE_RE = /^\*\*\s*(第\d+条.*?|附則)\s*\*\*\s*$/;
 // A top-level numbered 項: `1. text`, `2. text`, …
 const PARAGRAPH_RE = /^(\d+)\.\s+(.+)$/;
 
-const SNIPPET_CHARS = 40;
-// Small boost so a query word appearing in the 条 title can break ties
-// between otherwise similar 項.
-const LABEL_BOOST = 0.4;
-
 // Parse one section body into its 条 → 項 structure. Returns [] when the body
 // has no 条 headers at all (prose-only sections, non-規程 categories).
 export function parseArticles(body: string): Article[] {
   const articles: Article[] = [];
   let current: Article | null = null;
-  // The 条 chapeau accumulated before its first numbered 項.
   let lead: string[] = [];
   let para: Paragraph | null = null;
   let paraLines: string[] = [];
@@ -72,8 +66,6 @@ export function parseArticles(body: string): Article[] {
   const flushArticle = () => {
     flushPara();
     if (current) {
-      // A 条 with no numbered 項 is itself the finest citable unit; keep its
-      // chapeau prose as a single null-項 so it can still be scored.
       if (current.paragraphs.length === 0) {
         current.paragraphs.push({ number: null, text: lead.join(" ").trim() });
       }
@@ -105,51 +97,145 @@ export function parseArticles(body: string): Article[] {
   return articles;
 }
 
-function snippetOf(p: Paragraph, article: Article): string {
-  // A numbered 項 is matched by its own leading text; a 条 with no 項 is
-  // matched by its header label, which is short and unique within a section.
-  const basis = p.number === null ? article.label : p.text;
-  return basis.trim().slice(0, SNIPPET_CHARS);
+// Strip the inline/leading markdown that does not survive into rendered
+// textContent, so a candidate passage's text matches what the viewer sees.
+function stripInline(s: string): string {
+  return s
+    .replace(/^\s*#+\s*/, "")
+    .replace(/^\s*(?:\d+\.|[-*])\s+/, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .trim();
 }
 
-// Find the single 条/項 across `sections` that best matches `question`. Falls
-// back to section granularity (article "", paragraph null, snippet "") when
-// nothing scores or the sections carry no 条 structure.
-export function locateClause(
-  question: string,
-  sections: Section[],
-): ClauseLocation | null {
-  if (sections.length === 0) return null;
+// Fallback passage splitter for documents with no 条 structure: blank-line
+// separated blocks, inline markdown stripped, tables dropped.
+export function splitParagraphs(body: string): string[] {
+  return body
+    .split(/\n[ \t]*\n/)
+    .map((b) => stripInline(b.replace(/[ \t]*\n[ \t]*/g, " ").trim()))
+    .filter((b) => b.length >= 8 && !b.startsWith("|"));
+}
 
-  let best: ClauseLocation | null = null;
-  let bestScore = 0;
+interface Candidate {
+  sectionId: string;
+  sectionTitle: string;
+  sectionBody: string;
+  text: string;
+}
+
+// Every passage in the selected sections that could be the cited one: 項 (and
+// 条 chapeaux) for 規程-format documents, blank-line blocks otherwise.
+function candidates(sections: Section[]): Candidate[] {
+  const out: Candidate[] = [];
   for (const sec of sections) {
-    for (const article of parseArticles(sec.body)) {
-      const labelScore = LABEL_BOOST * sectionScore(question, article.label);
-      for (const p of article.paragraphs) {
-        const score = sectionScore(question, p.text) + labelScore;
-        if (score > bestScore) {
-          bestScore = score;
-          best = {
-            section_id: sec.id,
-            section_title: sec.title,
-            article: article.label,
-            paragraph: p.number,
-            snippet: snippetOf(p, article),
-          };
+    const articles = parseArticles(sec.body);
+    if (articles.length > 0) {
+      for (const art of articles) {
+        for (const p of art.paragraphs) {
+          if (p.text) {
+            out.push({
+              sectionId: sec.id,
+              sectionTitle: sec.title,
+              sectionBody: sec.body,
+              text: p.text,
+            });
+          }
         }
+      }
+    } else {
+      for (const para of splitParagraphs(sec.body)) {
+        out.push({
+          sectionId: sec.id,
+          sectionTitle: sec.title,
+          sectionBody: sec.body,
+          text: para,
+        });
       }
     }
   }
-  if (best) return best;
+  return out;
+}
 
-  // Nothing scored: cite the first selected section as-is.
-  const sec = sections[0];
-  return {
-    section_id: sec.id,
-    section_title: sec.title,
+// Best-effort 条/項 for a chosen 規程 passage. It came straight out of
+// parseArticles, so an exact text match against the same parse is reliable.
+function articleOf(
+  body: string,
+  text: string,
+): { article: string; paragraph: number | null } {
+  for (const art of parseArticles(body)) {
+    for (const p of art.paragraphs) {
+      if (p.text === text) return { article: art.label, paragraph: p.number };
+    }
+  }
+  return { article: "", paragraph: null };
+}
+
+const collapse = (s: string) => s.replace(/\s+/g, "");
+const SNIPPET_MIN = 30;
+const SNIPPET_MAX = 120;
+const SNIPPET_STEP = 20;
+
+// Shortest leading slice of `text` that occurs exactly once in `fullText`.
+// Whitespace is ignored on both sides (markdown line breaks vs. rendered text).
+export function uniquePrefix(text: string, fullText: string): string {
+  const hay = collapse(fullText);
+  for (
+    let len = SNIPPET_MIN;
+    len < text.length && len < SNIPPET_MAX;
+    len += SNIPPET_STEP
+  ) {
+    const cand = text.slice(0, len);
+    if (hay.split(collapse(cand)).length - 1 <= 1) return cand;
+  }
+  return text.slice(0, SNIPPET_MAX);
+}
+
+// Find the passage across `sections` that best answers `question`, and return
+// a citation: the section it sits in, a document-unique snippet of its text,
+// and (best-effort) the 条/項 it falls under for display.
+export async function locateCitation(
+  question: string,
+  sections: Section[],
+  docId: string,
+): Promise<CitedLocation | null> {
+  if (sections.length === 0) return null;
+
+  const sectionFallback = (): CitedLocation => ({
+    section_id: sections[0].id,
+    section_title: sections[0].title,
     article: "",
     paragraph: null,
     snippet: "",
+  });
+
+  const cands = candidates(sections);
+  if (cands.length === 0) return sectionFallback();
+
+  let best = cands[0];
+  let bestScore = -1;
+  for (const c of cands) {
+    const score = sectionScore(question, c.text);
+    if (score > bestScore) {
+      bestScore = score;
+      best = c;
+    }
+  }
+  if (bestScore <= 0) return sectionFallback();
+
+  const { article, paragraph } = articleOf(best.sectionBody, best.text);
+
+  // Uniqueness is checked against the whole document — the viewer searches the
+  // whole article. Fall back to the selected sections if the load fails.
+  const full = await loadAllSections(docId);
+  const fullText = (full?.sections ?? sections).map((s) => s.body).join("\n");
+
+  return {
+    section_id: best.sectionId,
+    section_title: best.sectionTitle,
+    article,
+    paragraph,
+    snippet: uniquePrefix(best.text, fullText),
   };
 }

@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseArticles, locateClause } from "../lib/clause-locate";
+import {
+  parseArticles,
+  splitParagraphs,
+  uniquePrefix,
+} from "../lib/clause-locate";
 
 const SEC3_BODY = `**第13条(機器貸与)**
 1. 当社は、在宅勤務者に対し業務遂行に必要な機器を貸与する。
@@ -11,6 +15,10 @@ const SEC3_BODY = `**第13条(機器貸与)**
 
 const SEC1_BODY = `**第1条(目的)**
 本規程は、在宅勤務の実施に当たり必要な事項を定めることを目的とする。`;
+
+const PROSE_BODY = `これは規程ではない文書の本文です。条も項もありません。
+
+二つ目の段落です。手順や説明が続きます。`;
 
 describe("parseArticles", () => {
   it("splits a section body into 条 and numbered 項", () => {
@@ -30,28 +38,30 @@ describe("parseArticles", () => {
   });
 
   it("returns [] for prose with no 条 headers", () => {
-    expect(parseArticles("これは普通の文章です。\n見出しも条もありません。")).toEqual([]);
+    expect(parseArticles(PROSE_BODY)).toEqual([]);
   });
 });
 
-describe("locateClause", () => {
-  const sections = [
-    { id: "sec_3", title: "第3章 機器貸与と費用負担", body: SEC3_BODY },
-  ];
+describe("splitParagraphs", () => {
+  it("splits prose into blank-line separated blocks", () => {
+    const blocks = splitParagraphs(PROSE_BODY);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toContain("規程ではない文書");
+    expect(blocks[1]).toContain("二つ目の段落");
+  });
+});
 
-  it("pinpoints the 項 that best matches the question", () => {
-    const loc = locateClause("貸与機器を業務目的以外に使用できますか", sections);
-    expect(loc?.section_id).toBe("sec_3");
-    expect(loc?.article).toBe("第13条(機器貸与)");
-    expect(loc?.paragraph).toBe(2);
-    expect(loc?.snippet.length).toBeGreaterThan(0);
+describe("uniquePrefix", () => {
+  it("returns the whole text when it is short", () => {
+    expect(uniquePrefix("みじかい文", "前後 みじかい文 など")).toBe("みじかい文");
   });
 
-  it("falls back to section granularity when nothing scores", () => {
-    const loc = locateClause("XYZ", sections);
-    expect(loc?.section_id).toBe("sec_3");
-    expect(loc?.article).toBe("");
-    expect(loc?.paragraph).toBeNull();
-    expect(loc?.snippet).toBe("");
+  it("returns a prefix that occurs exactly once in the document", () => {
+    const passage =
+      "これは引用される具体的な一文であり、ユニークな内容を十分な長さで含んでいます。";
+    const full = `無関係な前段の文章。${passage} 別の無関係な後段の文章。`;
+    const snip = uniquePrefix(passage, full);
+    expect(passage.startsWith(snip)).toBe(true);
+    expect(full.split(snip).length - 1).toBe(1);
   });
 });

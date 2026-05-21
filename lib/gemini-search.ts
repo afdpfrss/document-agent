@@ -5,7 +5,7 @@ import {
   type DocumentMeta,
 } from "./document-utils";
 import { selectSections } from "./section-select";
-import { locateClause, type ClauseLocation } from "./clause-locate";
+import { locateCitation, type CitedLocation } from "./clause-locate";
 import { llmConfig, requireApiKey } from "./llm-config";
 import { renderVectorBlock, vectorSearch } from "./hybrid-search";
 import { getOrCreateStep1Cache, STEP1_SYSTEM_INSTRUCTION } from "./prompt-cache";
@@ -20,8 +20,8 @@ export interface SearchSource {
   doc_id: string;
   title: string;
   category: string;
-  // The single 条/項 this document contributed, resolved at request time.
-  cited: ClauseLocation;
+  // The passage this document contributed, resolved at request time.
+  cited: CitedLocation;
 }
 
 // A drill-down chip click carries the previous turn's candidate documents so
@@ -528,12 +528,16 @@ async function* runConcreteAnswer(
   blocks: AnswerBlock[],
   history: ChatTurn[] | undefined,
 ): AsyncGenerator<SearchEvent> {
-  const sources: SearchSource[] = blocks.flatMap((b) => {
-    const cited = locateClause(question, b.sections);
-    return cited
-      ? [{ doc_id: b.doc.id, title: b.doc.title, category: b.doc.category, cited }]
-      : [];
-  });
+  const sources: SearchSource[] = (
+    await Promise.all(
+      blocks.map(async (b) => {
+        const cited = await locateCitation(question, b.sections, b.doc.id);
+        return cited
+          ? { doc_id: b.doc.id, title: b.doc.title, category: b.doc.category, cited }
+          : null;
+      }),
+    )
+  ).filter((s): s is SearchSource => s !== null);
 
   // Step 3 generates the body only (no 一言, no marker). Strip leading
   // whitespace from the first chunk so the answer starts cleanly.

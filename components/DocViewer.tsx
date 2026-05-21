@@ -18,65 +18,47 @@ interface Props {
 }
 
 export function DocViewer({ doc, sections, canEdit = false }: Props) {
-  // A chat citation deep-links to a specific 条/項. The section id arrives as
-  // ?sec= and the cited clause text as ?cite= — deliberately NOT as a URL
-  // #hash: a hash makes the browser and Next.js's router (layout-router.js)
-  // scroll to the section element, which overrides the clause-level scroll
-  // below. With the target in query params nothing else scrolls, so this
-  // effect lands on — and highlights — the exact clause.
-  //
-  // A plain section/ToC link still uses a #hash (Next.js handles it natively);
-  // we re-honor it here too so a direct /docs/[id]#sec_N load lands cleanly.
-  // Keyed on doc.id so it also re-runs on in-app navigation between /docs/[id]
+  // A chat citation deep-links to the exact passage the answer drew on. The
+  // server passes that passage's text as ?cite= — a snippet it guaranteed to
+  // be unique within the document, so a plain text search here is collision-
+  // free regardless of the document's format. Deliberately NOT a URL #hash: a
+  // hash would make the browser scroll to the section and override this. The
+  // matched passage is marked persistently so the reader sees what was cited.
+  // Keyed on doc.id so it re-runs on in-app navigation between /docs/[id]
   // routes (which reuse this component).
-  //
-  // Clause matching: the server resolved the exact 条/項 and passed its text,
-  // so an exact, whitespace-insensitive substring match against the rendered
-  // 条/項 elements (<p>/<li>) wins; a bigram fallback covers markdown drift.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const sectionId = params.get("sec") || window.location.hash.slice(1);
-    if (!sectionId) return;
-    const sectionEl = document.getElementById(sectionId);
-    if (!sectionEl) return;
+    const cite = new URLSearchParams(window.location.search).get("cite") ?? "";
+    const needle = cite.replace(/\s+/g, "");
+    if (!needle) return;
 
-    const cite = params.get("cite") ?? "";
-    let target: Element = sectionEl;
-    let highlightClass = "doc-section-highlight";
-
-    if (cite) {
-      const candidates = Array.from(sectionEl.querySelectorAll("li, p"));
-      const needle = cite.replace(/\s+/g, "");
-      let best: Element | null = null;
-      for (const el of candidates) {
-        if ((el.textContent ?? "").replace(/\s+/g, "").includes(needle)) {
-          best = el;
-          break;
-        }
-      }
-      if (!best) {
-        let bestScore = 0;
-        for (const el of candidates) {
-          const score = sectionScore(cite, el.textContent ?? "");
-          if (score > bestScore) {
-            bestScore = score;
-            best = el;
-          }
-        }
-      }
-      if (best) {
-        target = best;
-        highlightClass = "doc-clause-highlight";
+    // The snippet is unique document-wide, so search the whole article body.
+    const candidates = Array.from(
+      document.querySelectorAll(
+        ".markdown p, .markdown li, .markdown td, .markdown blockquote",
+      ),
+    );
+    let target: Element | null = null;
+    for (const el of candidates) {
+      if ((el.textContent ?? "").replace(/\s+/g, "").includes(needle)) {
+        target = el;
+        break;
       }
     }
+    if (!target) {
+      // Bigram fallback — covers a passage edited since the link was made.
+      let bestScore = 0;
+      for (const el of candidates) {
+        const score = sectionScore(cite, el.textContent ?? "");
+        if (score > bestScore) {
+          bestScore = score;
+          target = el;
+        }
+      }
+    }
+    if (!target) return;
 
-    target.scrollIntoView({
-      behavior: "auto",
-      block: target === sectionEl ? "start" : "center",
-    });
-    target.classList.add(highlightClass);
-    const t = setTimeout(() => target.classList.remove(highlightClass), 1800);
-    return () => clearTimeout(t);
+    target.scrollIntoView({ behavior: "auto", block: "center" });
+    target.classList.add("doc-clause-mark");
   }, [doc.id]);
 
   return (
