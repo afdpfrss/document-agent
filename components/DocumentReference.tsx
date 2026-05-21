@@ -10,8 +10,21 @@ export interface SearchSource {
   section_titles: string[];
 }
 
-export function DocumentReference({ sources }: { sources: SearchSource[] }) {
+export function DocumentReference({
+  sources,
+  question,
+}: {
+  sources: SearchSource[];
+  // The user question that produced these sources. Forwarded as ?q= on the
+  // section link so the doc viewer can deep-link to the closest 条/項.
+  question?: string;
+}) {
   const [open, setOpen] = useState(true);
+
+  // First ~200 chars are plenty for the bigram match and keep the URL short.
+  const qSuffix = question?.trim()
+    ? `?q=${encodeURIComponent(question.trim().slice(0, 200))}`
+    : "";
 
   return (
     <div className="mt-4 border-t border-slate-100 pt-3">
@@ -44,8 +57,8 @@ export function DocumentReference({ sources }: { sources: SearchSource[] }) {
                 <a
                   href={
                     s.section_ids[0]
-                      ? `/docs/${s.doc_id}#${s.section_ids[0]}`
-                      : `/docs/${s.doc_id}`
+                      ? `/docs/${s.doc_id}${qSuffix}#${s.section_ids[0]}`
+                      : `/docs/${s.doc_id}${qSuffix}`
                   }
                   target="_blank"
                   rel="noopener noreferrer"

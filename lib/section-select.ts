@@ -7,26 +7,11 @@
 // precomputed artifact, so the .md files stay the single source of truth.
 
 import { loadAllSections } from "./document-utils";
+import { sectionScore } from "./text-score";
 
-// Character bigrams, whitespace-stripped + lowercased. Bigram overlap is a
-// tokenizer-free fuzzy match that works for Japanese (no word spaces).
-function bigrams(s: string): Set<string> {
-  const t = s.toLowerCase().replace(/\s+/g, "");
-  const out = new Set<string>();
-  for (let i = 0; i < t.length - 1; i++) out.add(t.slice(i, i + 2));
-  return out;
-}
-
-// Relevance of a section to the query: the fraction of the query's bigrams
-// that also occur in the section text. Range 0..1.
-export function sectionScore(query: string, sectionText: string): number {
-  const q = bigrams(query);
-  if (q.size === 0) return 0;
-  const s = bigrams(sectionText);
-  let overlap = 0;
-  for (const g of q) if (s.has(g)) overlap++;
-  return overlap / q.size;
-}
+// The bigram scorer now lives in text-score.ts so the browser-side DocViewer
+// can share it. Re-exported here for existing consumers (e.g. tests).
+export { sectionScore };
 
 export interface SelectedSection {
   id: string;
