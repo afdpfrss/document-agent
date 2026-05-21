@@ -31,12 +31,20 @@ export default async function DocumentsPage() {
           </p>
         </div>
         {canEdit && (
-          <Link
-            href="/upload"
-            className="px-3 py-1.5 text-xs font-medium bg-indigo-900 text-white rounded-md hover:bg-indigo-800"
-          >
-            + 新規アップロード
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/compose"
+              className="px-3 py-1.5 text-xs font-medium bg-indigo-900 text-white rounded-md hover:bg-indigo-800"
+            >
+              + チャットで作成
+            </Link>
+            <Link
+              href="/upload"
+              className="px-3 py-1.5 text-xs font-medium border border-slate-300 text-slate-700 rounded-md hover:bg-slate-50"
+            >
+              アップロード
+            </Link>
+          </div>
         )}
       </header>
 

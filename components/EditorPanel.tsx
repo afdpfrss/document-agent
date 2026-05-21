@@ -152,7 +152,7 @@ export function EditorPanel(props: Props) {
   const applicableCount = cards.filter((c) => c.status.kind === "ok").length;
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-full flex flex-col">
       <header className="border-b border-slate-200 bg-white px-6 py-3 flex items-center justify-between">
         <div>
           <div className="text-xs text-slate-500">{props.docCategory} / {props.docPath}</div>
