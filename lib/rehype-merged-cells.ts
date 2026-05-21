@@ -84,6 +84,45 @@ function isMarker(t: string): boolean {
   return t === MERGE_LEFT || t === MERGE_UP;
 }
 
+// Ingest encodes an in-cell line break (Excel Alt+Enter, multi-line CSV
+// cells) as the literal text "<br>" so the GFM table row stays on one
+// physical line. react-markdown runs without rehype-raw, so an inline
+// "<br>" reaches us un-rendered — as a hast `raw` node (remark-rehype runs
+// with allowDangerousHtml) — and would otherwise be escaped to "&lt;br&gt;"
+// text. Convert it to a real <br> element. Scoped to table cells, so no
+// other raw HTML from document bodies is turned into markup.
+const BR_RE = /<br\s*\/?>/i;
+
+// A `raw` node carries inline HTML and is not part of hast's typed
+// ElementContent union; treat it (and plain text) as a string carrier.
+function breakableValue(child: ElementContent): string | null {
+  if (child.type === "text") return child.value;
+  if ((child as { type: string }).type === "raw") {
+    return (child as unknown as { value: string }).value;
+  }
+  return null;
+}
+
+function renderCellBreaks(node: Element): void {
+  const out: ElementContent[] = [];
+  for (const child of node.children) {
+    const value = breakableValue(child);
+    if (value !== null && BR_RE.test(value)) {
+      const parts = value.split(BR_RE);
+      parts.forEach((part, i) => {
+        if (i > 0) {
+          out.push({ type: "element", tagName: "br", properties: {}, children: [] });
+        }
+        if (part.length > 0) out.push({ type: "text", value: part });
+      });
+    } else {
+      if (child.type === "element") renderCellBreaks(child);
+      out.push(child);
+    }
+  }
+  node.children = out;
+}
+
 function processTable(table: Element): void {
   const rows = collectRows(table);
   if (rows.length === 0) return;
@@ -154,6 +193,11 @@ function processTable(table: Element): void {
         (child.tagName !== "td" && child.tagName !== "th") ||
         keep.has(child),
     );
+  }
+
+  // Geometry is settled — expand encoded line breaks in every surviving cell.
+  for (const row of rows) {
+    for (const cell of rowCells(row)) renderCellBreaks(cell);
   }
 }
 
