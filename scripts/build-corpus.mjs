@@ -63,8 +63,10 @@ console.log(
 // BUILD_NUMBER is the git commit count — the conventional deterministic build
 // number. (CI run counters are the other common source, but Cloudflare Workers
 // Builds exposes no monotonic counter.)
-// A shallow CI clone makes the commit count unreliable, so fall back to a
-// baseline that never lets the displayed number regress to a misleading value.
+// Cloudflare Workers Builds checks out a shallow clone, where `rev-list --count`
+// only sees the fetched depth. We deepen the clone with `fetch --unshallow`
+// first; if that is not possible (no network / no remote) we fall back to a
+// baseline so the displayed number never regresses to a misleading value.
 const BUILD_BASELINE = 86;
 
 function git(args) {
@@ -76,7 +78,18 @@ function git(args) {
 
 let buildNumber = BUILD_BASELINE;
 try {
-  const shallow = git("rev-parse --is-shallow-repository") === "true";
+  let shallow = git("rev-parse --is-shallow-repository") === "true";
+  if (shallow) {
+    // Deepen the clone so the commit count reflects real history rather than
+    // the truncated fetch depth. Best-effort: a missing remote or no network
+    // leaves it shallow and we fall back to the baseline below.
+    try {
+      git("fetch --unshallow --quiet");
+      shallow = git("rev-parse --is-shallow-repository") === "true";
+    } catch {
+      // keep shallow
+    }
+  }
   const count = Number.parseInt(git("rev-list --count HEAD"), 10);
   if (!shallow && Number.isFinite(count)) buildNumber = count;
 } catch {
