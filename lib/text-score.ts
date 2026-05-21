@@ -1,10 +1,11 @@
-// Tokenizer-free fuzzy text scoring (character-bigram overlap).
+// Tokenizer-free text utilities shared by server and browser. Dependency-free
+// and free of server-only imports, so it runs in both places.
 //
-// Character-bigram overlap works for Japanese, which has no word spaces. This
-// module is kept dependency-free and free of any server-only imports so it can
-// run both server-side (lib/section-select.ts ranks sections) and in the
-// browser (components/DocViewer.tsx deep-links a chat citation to the most
-// relevant 条/項 inside a section).
+// - sectionScore: character-bigram overlap, for fuzzy relevance ranking.
+// - canonical / textHash: a content fingerprint. `canonical` reduces a string
+//   to just its letters and numbers, so markdown-derived text (server) and
+//   rendered textContent (browser) collapse to the same value; `textHash` turns
+//   that into a short token used as a chat-citation deep-link (?cite=).
 
 // Character bigrams, whitespace-stripped + lowercased.
 function bigrams(s: string): Set<string> {
@@ -23,4 +24,25 @@ export function sectionScore(query: string, text: string): number {
   let overlap = 0;
   for (const g of q) if (s.has(g)) overlap++;
   return overlap / q.size;
+}
+
+// Reduce a string to its letters and numbers only — dropping markdown syntax,
+// punctuation and whitespace. Markdown link URLs are stripped first so only the
+// link text survives. The server (markdown text) and the browser (rendered
+// textContent) thus produce the same value for the same passage.
+export function canonical(s: string): string {
+  return s
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+// FNV-1a (32-bit) → 8-char hex. Deterministic and stable across server and
+// browser, used as the opaque ?cite= deep-link token.
+export function textHash(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
 }

@@ -528,16 +528,12 @@ async function* runConcreteAnswer(
   blocks: AnswerBlock[],
   history: ChatTurn[] | undefined,
 ): AsyncGenerator<SearchEvent> {
-  const sources: SearchSource[] = (
-    await Promise.all(
-      blocks.map(async (b) => {
-        const cited = await locateCitation(question, b.sections, b.doc.id);
-        return cited
-          ? { doc_id: b.doc.id, title: b.doc.title, category: b.doc.category, cited }
-          : null;
-      }),
-    )
-  ).filter((s): s is SearchSource => s !== null);
+  const sources: SearchSource[] = blocks.flatMap((b) => {
+    const cited = locateCitation(question, b.sections);
+    return cited
+      ? [{ doc_id: b.doc.id, title: b.doc.title, category: b.doc.category, cited }]
+      : [];
+  });
 
   // Step 3 generates the body only (no 一言, no marker). Strip leading
   // whitespace from the first chunk so the answer starts cleanly.
