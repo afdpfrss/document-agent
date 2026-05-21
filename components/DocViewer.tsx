@@ -18,24 +18,29 @@ interface Props {
 }
 
 export function DocViewer({ doc, sections, canEdit = false }: Props) {
-  // Browsers normally honor #anchor on navigation, but when the target page is
-  // a Next.js client-rendered route the hash can be processed before the
-  // section element exists. Re-trigger the scroll + brief highlight so the user
-  // sees where they landed. Keyed on doc.id so it also re-runs on in-app
-  // navigation between two /docs/[id] routes (which reuse this component).
+  // A chat citation deep-links to a specific 条/項. The section id arrives as
+  // ?sec= and the cited clause text as ?cite= — deliberately NOT as a URL
+  // #hash: a hash makes the browser and Next.js's router (layout-router.js)
+  // scroll to the section element, which overrides the clause-level scroll
+  // below. With the target in query params nothing else scrolls, so this
+  // effect lands on — and highlights — the exact clause.
   //
-  // A chat citation link also carries the cited clause text as ?cite=. When it
-  // does, we don't stop at the section top: the server resolved the exact
-  // 条/項, so we match its text against the rendered 条/項 elements (<p>/<li>)
-  // and land on — and highlight — that clause. An exact, whitespace-insensitive
-  // substring match wins; a bigram fallback covers truncation or markdown drift.
+  // A plain section/ToC link still uses a #hash (Next.js handles it natively);
+  // we re-honor it here too so a direct /docs/[id]#sec_N load lands cleanly.
+  // Keyed on doc.id so it also re-runs on in-app navigation between /docs/[id]
+  // routes (which reuse this component).
+  //
+  // Clause matching: the server resolved the exact 条/項 and passed its text,
+  // so an exact, whitespace-insensitive substring match against the rendered
+  // 条/項 elements (<p>/<li>) wins; a bigram fallback covers markdown drift.
   useEffect(() => {
-    const hash = window.location.hash.slice(1);
-    if (!hash) return;
-    const sectionEl = document.getElementById(hash);
+    const params = new URLSearchParams(window.location.search);
+    const sectionId = params.get("sec") || window.location.hash.slice(1);
+    if (!sectionId) return;
+    const sectionEl = document.getElementById(sectionId);
     if (!sectionEl) return;
 
-    const cite = new URLSearchParams(window.location.search).get("cite") ?? "";
+    const cite = params.get("cite") ?? "";
     let target: Element = sectionEl;
     let highlightClass = "doc-section-highlight";
 

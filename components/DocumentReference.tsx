@@ -20,12 +20,15 @@ function citationLabel(c: ClauseLocation): string {
   return parts.join(" › ");
 }
 
-// Deep-link to the cited clause. `?cite=` carries the clause text so the doc
-// viewer can scroll to (and highlight) the exact 条/項; the #section hash is
-// the graceful fallback when no clause text was resolved.
+// Deep-link to the cited clause. The section id and clause text are passed as
+// query params, NOT as a URL #hash: a hash makes the browser (and Next.js's
+// router) scroll to the section element, which overrides DocViewer's
+// clause-level scroll. `?sec=` is the section; `?cite=` is the clause text.
 function citationHref(c: ClauseLocation, docId: string): string {
-  const cite = c.snippet ? `?cite=${encodeURIComponent(c.snippet)}` : "";
-  return `/docs/${docId}${cite}#${c.section_id}`;
+  const params = new URLSearchParams();
+  params.set("sec", c.section_id);
+  if (c.snippet) params.set("cite", c.snippet);
+  return `/docs/${docId}?${params.toString()}`;
 }
 
 export function DocumentReference({ sources }: { sources: SearchSource[] }) {
