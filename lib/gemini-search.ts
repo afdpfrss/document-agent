@@ -2,9 +2,9 @@ import { GoogleGenerativeAI, type UsageMetadata } from "@google/generative-ai";
 import {
   buildIndexSnippet,
   loadIndex,
-  loadSections,
   type DocumentMeta,
 } from "./document-utils";
+import { selectSections } from "./section-select";
 import { llmConfig, requireApiKey } from "./llm-config";
 import { renderVectorBlock, vectorSearch } from "./hybrid-search";
 import { getOrCreateStep1Cache, STEP1_SYSTEM_INSTRUCTION } from "./prompt-cache";
@@ -60,7 +60,6 @@ export type SearchEvent =
 
 interface Step1Candidate {
   doc_id: string;
-  section_ids: string[];
   reason: string;
 }
 
@@ -385,7 +384,9 @@ export async function* searchDocumentsStream(
   for (const c of candidates.slice(0, 3)) {
     const doc = index.find((d) => d.id === c.doc_id);
     if (!doc) continue;
-    const sections = await loadSections(c.doc_id, c.section_ids.slice(0, 3));
+    // Step 1 picked the document; section selection is done here by relevance
+    // score (lib/section-select.ts) rather than by the LLM.
+    const sections = await selectSections(question, c.doc_id, 3);
     if (sections.length === 0) continue;
     blocks.push({ doc, sections });
   }
