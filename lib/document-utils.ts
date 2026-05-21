@@ -6,8 +6,8 @@ import { corpus } from "./generated/corpus";
 // Cloudflare Workers (the OpenNext deployment) have no project filesystem at
 // runtime — documents/ cannot be read with fs. There the corpus comes from a
 // build-time bundle (lib/generated/corpus.ts, scripts/build-corpus.mjs). Node
-// deployments (next dev / next start / Vercel) keep reading documents/ off
-// disk so the upload pipeline's in-place edits are visible immediately.
+// runtimes (next dev / next start) keep reading documents/ off disk so the
+// upload pipeline's in-place edits are visible immediately.
 // navigator.userAgent is the documented Workers runtime probe.
 const ON_WORKERS =
   typeof navigator !== "undefined" &&

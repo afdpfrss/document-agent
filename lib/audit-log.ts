@@ -2,7 +2,7 @@
 //
 // Records security-relevant events — authn/authz outcomes, searches, edit
 // proposals, PR creation — as single-line structured JSON on stdout, so a
-// log aggregator (Vercel log drain, Datadog, etc.) can ship and query them.
+// log aggregator (Cloudflare Logpush, Datadog, etc.) can ship and query them.
 // There is no database (docs/v2-design.md §10): this is a log stream, not a
 // queryable store. Pairing it with the GitHub commit/PR history gives a full
 // "who changed what" trail.

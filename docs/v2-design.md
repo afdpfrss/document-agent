@@ -115,7 +115,7 @@
 
 | 項目 | 主要要素 | 確定度 |
 |---|---|---|
-| GitHub バックエンド | 編集 = branch、提案 = PR、承認 = merge。CODEOWNERS でカテゴリ別承認者。Octokit 経由で UI から間接操作。Vercel webhook で自動再デプロイ | 採用方針 |
+| GitHub バックエンド | 編集 = branch、提案 = PR、承認 = merge。CODEOWNERS でカテゴリ別承認者。Octokit 経由で UI から間接操作。Cloudflare Workers（GitHub 連携）で自動再デプロイ | 採用方針 |
 
 ### F. MCP コネクタ（リモート MCP サーバ）
 
@@ -156,10 +156,10 @@
 
 | 領域 | 採用 | 理由 |
 |---|---|---|
-| **Framework** | Next.js 16（既存維持）| Vercel デプロイ前提、breaking changes は AGENTS.md 参照 |
+| **Framework** | Next.js 16（既存維持）| Cloudflare Workers（OpenNext）デプロイ、breaking changes は AGENTS.md 参照 |
 | **LLM（開発フェーズ）** | Gemini 2.5 Flash + Flash-Lite | 無料枠 45,000 req/月、長文コンテキスト、既存実装 |
 | **LLM（本番フェーズ判断）** | Gemini 有料 or さくらの AI Engine | コンプラ要件次第。**LLM 設定は環境変数で抽象化** |
-| **Embedding** | Gemini text-embedding-004（暫定）| 後にさくらの multilingual-e5-large 検討 |
+| **Embedding** | Gemini gemini-embedding-001（暫定）| 後にさくらの multilingual-e5-large 検討 |
 | **ベクトル保存（初期）** | `documents/embeddings.json` + JS でコサイン計算 | 50〜数百件規模では pgvector 不要 |
 | **ベクトル保存（拡張）** | pgvector（Supabase）| 500 件超で移行 |
 | **差分エディタ** | `@monaco-editor/react`（DiffEditor）| VS Code 同等、左右編集可 |

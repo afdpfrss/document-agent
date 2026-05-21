@@ -44,7 +44,7 @@ function getSecret(): string | null {
 // --- base / resource URLs -------------------------------------------------
 
 // Public origin of this deployment. Prefer an explicit env override; otherwise
-// derive from forwarded headers (works behind the Vercel / proxy edge).
+// derive from forwarded headers (works behind a CDN / reverse-proxy edge).
 export function baseUrl(req: Request): string {
   const override = process.env.MCP_PUBLIC_URL || process.env.AUTH_URL;
   if (override) return override.replace(/\/+$/, "");
