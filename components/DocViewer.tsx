@@ -24,29 +24,39 @@ export function DocViewer({ doc, sections, canEdit = false }: Props) {
   // sees where they landed. Keyed on doc.id so it also re-runs on in-app
   // navigation between two /docs/[id] routes (which reuse this component).
   //
-  // A chat citation link may also carry the original question as ?q=. When it
-  // does, we don't stop at the section top — each 条/項 (rendered as <p>/<li>)
-  // in the section is scored against the question with the same bigram metric
-  // the server uses to rank sections, and we land on the closest paragraph.
+  // A chat citation link also carries the cited clause text as ?cite=. When it
+  // does, we don't stop at the section top: the server resolved the exact
+  // 条/項, so we match its text against the rendered 条/項 elements (<p>/<li>)
+  // and land on — and highlight — that clause. An exact, whitespace-insensitive
+  // substring match wins; a bigram fallback covers truncation or markdown drift.
   useEffect(() => {
     const hash = window.location.hash.slice(1);
     if (!hash) return;
     const sectionEl = document.getElementById(hash);
     if (!sectionEl) return;
 
-    const q = new URLSearchParams(window.location.search).get("q") ?? "";
+    const cite = new URLSearchParams(window.location.search).get("cite") ?? "";
     let target: Element = sectionEl;
     let highlightClass = "doc-section-highlight";
 
-    if (q) {
+    if (cite) {
       const candidates = Array.from(sectionEl.querySelectorAll("li, p"));
+      const needle = cite.replace(/\s+/g, "");
       let best: Element | null = null;
-      let bestScore = 0;
       for (const el of candidates) {
-        const score = sectionScore(q, el.textContent ?? "");
-        if (score > bestScore) {
-          bestScore = score;
+        if ((el.textContent ?? "").replace(/\s+/g, "").includes(needle)) {
           best = el;
+          break;
+        }
+      }
+      if (!best) {
+        let bestScore = 0;
+        for (const el of candidates) {
+          const score = sectionScore(cite, el.textContent ?? "");
+          if (score > bestScore) {
+            bestScore = score;
+            best = el;
+          }
         }
       }
       if (best) {

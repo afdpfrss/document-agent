@@ -1,30 +1,35 @@
 "use client";
 
 import { useState } from "react";
+import type { ClauseLocation } from "@/lib/clause-locate";
 
 export interface SearchSource {
   doc_id: string;
   title: string;
   category: string;
-  section_ids: string[];
-  section_titles: string[];
+  // The single 条/項 this document contributed to the answer.
+  cited: ClauseLocation;
 }
 
-export function DocumentReference({
-  sources,
-  question,
-}: {
-  sources: SearchSource[];
-  // The user question that produced these sources. Forwarded as ?q= on the
-  // section link so the doc viewer can deep-link to the closest 条/項.
-  question?: string;
-}) {
-  const [open, setOpen] = useState(true);
+// "第3章 機器貸与と費用負担 › 第13条(機器貸与) › 第1項" — drops the parts that
+// don't exist (a section with no 条 structure, or a 条 with no numbered 項).
+function citationLabel(c: ClauseLocation): string {
+  const parts = [c.section_title];
+  if (c.article) parts.push(c.article);
+  if (c.paragraph != null) parts.push(`第${c.paragraph}項`);
+  return parts.join(" › ");
+}
 
-  // First ~200 chars are plenty for the bigram match and keep the URL short.
-  const qSuffix = question?.trim()
-    ? `?q=${encodeURIComponent(question.trim().slice(0, 200))}`
-    : "";
+// Deep-link to the cited clause. `?cite=` carries the clause text so the doc
+// viewer can scroll to (and highlight) the exact 条/項; the #section hash is
+// the graceful fallback when no clause text was resolved.
+function citationHref(c: ClauseLocation, docId: string): string {
+  const cite = c.snippet ? `?cite=${encodeURIComponent(c.snippet)}` : "";
+  return `/docs/${docId}${cite}#${c.section_id}`;
+}
+
+export function DocumentReference({ sources }: { sources: SearchSource[] }) {
+  const [open, setOpen] = useState(true);
 
   return (
     <div className="mt-4 border-t border-slate-100 pt-3">
@@ -50,22 +55,11 @@ export function DocumentReference({
               key={s.doc_id}
               className="text-xs bg-indigo-50 border border-indigo-100 rounded-md px-3 py-2"
             >
-              <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700 bg-white border border-indigo-200 rounded px-1.5 py-0.5">
                   {s.category}
                 </span>
-                <a
-                  href={
-                    s.section_ids[0]
-                      ? `/docs/${s.doc_id}${qSuffix}#${s.section_ids[0]}`
-                      : `/docs/${s.doc_id}${qSuffix}`
-                  }
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-semibold text-indigo-900 hover:text-indigo-700 hover:underline"
-                >
-                  {s.title}
-                </a>
+                <span className="font-semibold text-indigo-900">{s.title}</span>
                 <span className="text-slate-400 text-[10px]">{s.doc_id}</span>
                 <a
                   href={`/edit/${s.doc_id}`}
@@ -77,18 +71,19 @@ export function DocumentReference({
                   編集
                 </a>
               </div>
-              {s.section_titles.length > 0 && (
-                <div className="text-slate-600 ml-1 flex flex-wrap gap-x-2 gap-y-1">
-                  {s.section_titles.map((t) => (
-                    <span
-                      key={t}
-                      className="before:content-['§_'] before:text-slate-400"
-                    >
-                      {t}
-                    </span>
-                  ))}
-                </div>
-              )}
+              <a
+                href={citationHref(s.cited, s.doc_id)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group flex items-baseline gap-1.5"
+              >
+                <span className="shrink-0 text-[10px] font-semibold text-indigo-700">
+                  参考にした箇所
+                </span>
+                <span className="text-slate-700 group-hover:text-indigo-700 group-hover:underline">
+                  {citationLabel(s.cited)}
+                </span>
+              </a>
             </li>
           ))}
         </ul>
