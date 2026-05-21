@@ -94,9 +94,9 @@ body {
    visible (no fade) so the reader can see what the answer drew on. A
    brand-color band sits on the left edge, like the section-target highlight. */
 .doc-clause-mark {
-  background: #c7d2fe;
+  background: var(--brand-soft);
   border-radius: 3px;
-  box-shadow: -4px 0 0 0 var(--brand), 0 0 0 4px #c7d2fe;
+  box-shadow: -4px 0 0 0 var(--brand), 0 0 0 4px var(--brand-soft);
   animation: doc-clause-mark-in 0.5s ease-out;
 }
 @keyframes doc-clause-mark-in {
