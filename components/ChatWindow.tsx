@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { DocumentReference, type SearchSource } from "./DocumentReference";
 import { rehypeMergedCells } from "@/lib/rehype-merged-cells";
+import { BUILD_NUMBER, BUILD_DATE } from "@/lib/build-info";
 import {
   CHAT_HEADINGS,
   CHAT_SUBTITLES,
@@ -14,6 +15,11 @@ import {
 } from "@/lib/sample-prompts";
 
 const DISPLAY_QUESTION_COUNT = 5;
+
+interface FollowupContext {
+  doc_ids: string[];
+  language: string;
+}
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -25,6 +31,11 @@ interface ChatMessage {
   // and we are waiting for the next delta. Render loading dots below the
   // already-shown intro until the next chunk arrives.
   intermission?: boolean;
+  // Drill-down suggestions rendered as clickable chips below the answer.
+  followups?: string[];
+  // Carry context for a chip click: re-sending one of `followups` with this
+  // focus lets the server skip Step 1.
+  followupContext?: FollowupContext;
 }
 
 interface ChatTurn {
@@ -111,7 +122,7 @@ export function ChatWindow() {
     });
   }, [messages, loading]);
 
-  async function submit(question: string) {
+  async function submit(question: string, focus?: FollowupContext) {
     const trimmed = question.trim();
     if (!trimmed || loading) return;
 
@@ -145,7 +156,11 @@ export function ChatWindow() {
       const res = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: trimmed, history }),
+        body: JSON.stringify({
+          question: trimmed,
+          history,
+          ...(focus ? { focus } : {}),
+        }),
       });
 
       if (!res.ok || !res.body) {
@@ -169,10 +184,19 @@ export function ChatWindow() {
         const line = raw.trim();
         if (!line) return;
         let ev: {
-          type: "sources" | "delta" | "intermission" | "done" | "error";
+          type:
+            | "sources"
+            | "delta"
+            | "intermission"
+            | "followups"
+            | "done"
+            | "error";
           sources?: SearchSource[];
           text?: string;
           error?: string;
+          items?: string[];
+          language?: string;
+          doc_ids?: string[];
         };
         try {
           ev = JSON.parse(line);
@@ -190,6 +214,14 @@ export function ChatWindow() {
           updateAssistant({ content, intermission: false });
         } else if (ev.type === "intermission") {
           updateAssistant({ intermission: true });
+        } else if (ev.type === "followups") {
+          updateAssistant({
+            followups: ev.items ?? [],
+            followupContext: {
+              doc_ids: ev.doc_ids ?? [],
+              language: ev.language ?? "ja",
+            },
+          });
         } else if (ev.type === "done") {
           updateAssistant({ streaming: false, intermission: false });
         } else if (ev.type === "error") {
@@ -262,7 +294,12 @@ export function ChatWindow() {
         )}
 
         {messages.map((m, i) => (
-          <MessageBubble key={i} message={m} />
+          <MessageBubble
+            key={i}
+            message={m}
+            disabled={loading}
+            onFollowup={submit}
+          />
         ))}
       </div>
 
@@ -293,12 +330,23 @@ export function ChatWindow() {
         <p className="text-xs text-slate-400 mt-2 text-center">
           回答はAI（Gemini）が生成しています。重要事項は必ず原文を確認してください。
         </p>
+        <p className="text-[11px] text-slate-400 mt-1 text-center">
+          Build {BUILD_NUMBER}（{BUILD_DATE}）
+        </p>
       </div>
     </div>
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+function MessageBubble({
+  message,
+  disabled,
+  onFollowup,
+}: {
+  message: ChatMessage;
+  disabled: boolean;
+  onFollowup: (question: string, focus?: FollowupContext) => void;
+}) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
@@ -350,6 +398,27 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             {message.sources && message.sources.length > 0 && (
               <DocumentReference sources={message.sources} />
             )}
+            {!message.streaming &&
+              message.followups &&
+              message.followups.length > 0 && (
+                <div className="mt-4 border-t border-slate-100 pt-3">
+                  <p className="text-xs font-semibold text-slate-500 mb-2">
+                    次に知りたいこと
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {message.followups.map((f) => (
+                      <button
+                        key={f}
+                        onClick={() => onFollowup(f, message.followupContext)}
+                        disabled={disabled}
+                        className="text-left text-xs px-3 py-1.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-900 hover:border-indigo-300 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {f}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
           </>
         )}
       </div>

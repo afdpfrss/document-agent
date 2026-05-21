@@ -137,15 +137,20 @@ export async function loadSections(
 
 const snippetCache = new WeakMap<DocumentMeta[], string>();
 
+// One dense line per document — id, category, title, keywords, summary.
+// Section lists are intentionally omitted: Step 1 selects documents only, and
+// section selection happens downstream (lib/section-select.ts). This is a
+// lossless re-encoding (no field's content is shortened) that just drops the
+// per-line labels/indentation, cutting Step 1's input tokens.
 export function buildIndexSnippet(index: DocumentMeta[]): string {
   const cached = snippetCache.get(index);
   if (cached) return cached;
   const snippet = index
-    .map((d) => {
-      const secs = d.sections.map((s) => `${s.id}:${s.title}`).join(" | ");
-      return `[${d.id}] (${d.category}) ${d.title}\n  keywords: ${d.keywords.join(", ")}\n  summary: ${d.summary}\n  sections: ${secs}`;
-    })
-    .join("\n\n");
+    .map(
+      (d) =>
+        `[${d.id}|${d.category}] ${d.title} / kw: ${d.keywords.join(", ")} / ${d.summary}`,
+    )
+    .join("\n");
   snippetCache.set(index, snippet);
   return snippet;
 }
