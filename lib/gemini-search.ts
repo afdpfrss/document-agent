@@ -7,7 +7,6 @@ import {
 import { selectSections } from "./section-select";
 import { locateCitation, type CitedLocation } from "./clause-locate";
 import { llmConfig, requireApiKey } from "./llm-config";
-import { renderVectorBlock, vectorSearch } from "./hybrid-search";
 import { getOrCreateStep1Cache, STEP1_SYSTEM_INSTRUCTION } from "./prompt-cache";
 import { OFFTOPIC_FALLBACK_INSTRUCTION, PERSONA_INSTRUCTION } from "./persona";
 
@@ -171,21 +170,7 @@ async function step1FindCandidates(
   index: DocumentMeta[],
   history?: ChatTurn[],
 ): Promise<Step1Result> {
-  // Hybrid search and snippet build run in parallel — the vector RTT overlaps
-  // with the (synchronous, cached) snippet build. Vector path is best-effort.
-  const [vectorHits, indexSnippet] = await Promise.all([
-    vectorSearch(question, 10).catch((e) => {
-      console.warn("[search] vectorSearch threw, falling back:", e instanceof Error ? e.message : e);
-      return null;
-    }),
-    Promise.resolve(buildIndexSnippet(index)),
-  ]);
-  if (vectorHits) {
-    console.log(
-      `[search.hybrid] vector_hits=${vectorHits.length} top_score=${vectorHits[0]?.score.toFixed(3) ?? "n/a"}`,
-    );
-  }
-  const vectorBlock = vectorHits ? renderVectorBlock(vectorHits) : "";
+  const indexSnippet = buildIndexSnippet(index);
   const historyBlock = renderHistoryBlock(history);
 
   // Phase 8: try explicit context caching for the fixed prefix (system
@@ -200,10 +185,10 @@ async function step1FindCandidates(
     const model = client.getGenerativeModelFromCachedContent(cached, {
       generationConfig: STEP1_GENERATION_CONFIG,
     });
-    // Per-request body only carries the variable parts (vector hint + history
-    // + the actual question). Everything else lives in the cached prefix, so
-    // history must stay in this tail to keep the cache key stable.
-    const variablePrompt = `${vectorBlock}${historyBlock}# ユーザーの質問\n${question}`;
+    // Per-request body only carries the variable parts (history + the actual
+    // question). Everything else lives in the cached prefix, so history must
+    // stay in this tail to keep the cache key stable.
+    const variablePrompt = `${historyBlock}# ユーザーの質問\n${question}`;
     result = await withRetry(() => model.generateContent(variablePrompt));
   } else {
     const model = client.getGenerativeModel({
@@ -211,7 +196,7 @@ async function step1FindCandidates(
       systemInstruction: STEP1_SYSTEM_INSTRUCTION,
       generationConfig: STEP1_GENERATION_CONFIG,
     });
-    const inlinePrompt = `${vectorBlock}# ドキュメント一覧
+    const inlinePrompt = `# ドキュメント一覧
 ${indexSnippet}
 
 ${historyBlock}# ユーザーの質問

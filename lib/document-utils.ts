@@ -1,17 +1,43 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import matter from "gray-matter";
-import { corpus } from "./generated/corpus";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 // Cloudflare Workers (the OpenNext deployment) have no project filesystem at
-// runtime — documents/ cannot be read with fs. There the corpus comes from a
-// build-time bundle (lib/generated/corpus.ts, scripts/build-corpus.mjs). Node
-// runtimes (next dev / next start) keep reading documents/ off disk so the
-// upload pipeline's in-place edits are visible immediately.
+// runtime — documents/ cannot be read with fs. There the corpus is served from
+// the deployment's static assets (public/corpus.json, built by
+// scripts/build-corpus.mjs) and fetched via the ASSETS binding. Node runtimes
+// (next dev / next start) keep reading documents/ off disk so the upload
+// pipeline's in-place edits are visible immediately.
 // navigator.userAgent is the documented Workers runtime probe.
 const ON_WORKERS =
   typeof navigator !== "undefined" &&
   navigator.userAgent === "Cloudflare-Workers";
+
+// The corpus is fetched once per Worker isolate from static assets (it is
+// immutable for the life of a deploy). The Promise is memoised so concurrent
+// first requests share a single fetch+parse. wrangler.jsonc declares the
+// ASSETS binding; the generated cloudflare-env.d.ts is git-ignored, so the one
+// binding we use is typed inline here.
+let workerCorpus: Promise<Record<string, string>> | null = null;
+
+function loadWorkerCorpus(): Promise<Record<string, string>> {
+  if (!workerCorpus) {
+    workerCorpus = (async () => {
+      const { env } = getCloudflareContext() as unknown as {
+        env: { ASSETS: { fetch(input: string): Promise<Response> } };
+      };
+      const res = await env.ASSETS.fetch("https://assets.local/corpus.json");
+      if (!res.ok) {
+        throw new Error(
+          `failed to load corpus.json from ASSETS (status ${res.status})`,
+        );
+      }
+      return (await res.json()) as Record<string, string>;
+    })();
+  }
+  return workerCorpus;
+}
 
 export interface SectionMeta {
   id: string;
@@ -33,12 +59,14 @@ const INDEX_REL = "documents/index.json";
 const INDEX_PATH = path.join(ROOT, INDEX_REL);
 
 // Reads a repo-root-relative file (e.g. "documents/foo/doc_001.md"). On
-// Workers it is served from the bundled corpus; on Node it is read off disk.
+// Workers it comes from the corpus served via static assets; on Node it is
+// read off disk.
 export async function readRepoFile(repoRelPath: string): Promise<string> {
   if (ON_WORKERS) {
+    const corpus = await loadWorkerCorpus();
     const content = corpus[repoRelPath];
     if (content === undefined) {
-      throw new Error(`corpus bundle has no entry for ${repoRelPath}`);
+      throw new Error(`corpus.json has no entry for ${repoRelPath}`);
     }
     return content;
   }
@@ -48,14 +76,15 @@ export async function readRepoFile(repoRelPath: string): Promise<string> {
 let indexCache: { mtimeMs: number; data: DocumentMeta[] } | null = null;
 let workerIndexCache: DocumentMeta[] | null = null;
 
-// On Workers the corpus is immutable per deploy — parse the bundled index
-// once. On Node an mtime-keyed cache keeps reads fresh: the upload pipeline
-// rewrites index.json in-place, and the search/edit/docs routes need to see
-// new data even across separate Next.js dev bundles. Checking stat is ~50 µs
-// and avoids the explicit invalidation dance.
+// On Workers the corpus is immutable per deploy — parse the index once. On
+// Node an mtime-keyed cache keeps reads fresh: the upload pipeline rewrites
+// index.json in-place, and the search/edit/docs routes need to see new data
+// even across separate Next.js dev bundles. Checking stat is ~50 µs and
+// avoids the explicit invalidation dance.
 export async function loadIndex(): Promise<DocumentMeta[]> {
   if (ON_WORKERS) {
     if (!workerIndexCache) {
+      const corpus = await loadWorkerCorpus();
       workerIndexCache = JSON.parse(corpus[INDEX_REL]) as DocumentMeta[];
     }
     return workerIndexCache;

@@ -4,9 +4,9 @@
 // exposed by app/api/mcp/route.ts. They deliberately call NO answer-generating
 // LLM: candidate selection and answer generation are the job of the *user's*
 // Claude (docs/v2-design.md §4, MCP connector layer). The server only does
-// metadata filtering + best-effort vector similarity, and returns a
-// deliberately narrow slice of the corpus so the staged-disclosure structure
-// (docs/v2-design.md §2, §3) is preserved on the tool boundary.
+// metadata filtering, and returns a deliberately narrow slice of the corpus so
+// the staged-disclosure structure (docs/v2-design.md §2, §3) is preserved on
+// the tool boundary.
 
 import {
   loadAllSections,
@@ -14,7 +14,6 @@ import {
   loadSections,
   type DocumentMeta,
 } from "@/lib/document-utils";
-import { vectorSearch } from "@/lib/hybrid-search";
 
 export interface DocCandidate {
   doc_id: string;
@@ -24,12 +23,10 @@ export interface DocCandidate {
   summary: string;
   sections: { id: string; title: string }[];
   score: number;
-  matched_via: Array<"metadata" | "vector">;
 }
 
 export interface SearchDocumentsResult {
   query: string;
-  vector_search_used: boolean;
   total_documents: number;
   candidate_count: number;
   candidates: DocCandidate[];
@@ -73,42 +70,18 @@ function metadataScore(query: string, doc: DocumentMeta): number {
 const DEFAULT_CANDIDATE_LIMIT = 12;
 
 // search_documents — returns a candidate pool (frontmatter + summary only,
-// no section bodies). The union of metadata matches and vector-similarity
-// hits; final TOP selection is left to the caller's Claude.
+// no section bodies) ranked by metadata relevance; final TOP selection is left
+// to the caller's Claude.
 export async function searchDocuments(
   query: string,
   limit = DEFAULT_CANDIDATE_LIMIT,
 ): Promise<SearchDocumentsResult> {
   const index = await loadIndex();
 
-  const metaScores = new Map<string, number>();
-  for (const doc of index) {
-    const s = metadataScore(query, doc);
-    if (s > 0) metaScores.set(doc.id, s);
-  }
-
-  // Vector layer is best-effort: a missing embeddings.json, a missing
-  // GEMINI_API_KEY, or a failed embed call all degrade silently to
-  // metadata-only (docs/v2-design.md §2; lib/hybrid-search.ts contract).
-  const hits = await vectorSearch(query, 15).catch(() => null);
-  const vecScores = new Map<string, number>();
-  if (hits) {
-    for (const h of hits) {
-      const prev = vecScores.get(h.doc_id) ?? 0;
-      if (h.score > prev) vecScores.set(h.doc_id, h.score);
-    }
-  }
-
-  const ids = new Set<string>([...metaScores.keys(), ...vecScores.keys()]);
   const candidates: DocCandidate[] = [];
-  for (const id of ids) {
-    const doc = index.find((d) => d.id === id);
-    if (!doc) continue;
-    const m = metaScores.get(id) ?? 0;
-    const v = vecScores.get(id) ?? 0;
-    const matched_via: Array<"metadata" | "vector"> = [];
-    if (m > 0) matched_via.push("metadata");
-    if (v > 0) matched_via.push("vector");
+  for (const doc of index) {
+    const score = metadataScore(query, doc);
+    if (score <= 0) continue;
     candidates.push({
       doc_id: doc.id,
       title: doc.title,
@@ -116,10 +89,7 @@ export async function searchDocuments(
       keywords: doc.keywords,
       summary: doc.summary,
       sections: doc.sections.map((s) => ({ id: s.id, title: s.title })),
-      // Metadata stays primary; the cosine score (0..1) is scaled but bounded
-      // so a pure-vector hit augments rather than overrides metadata ranking.
-      score: Number((m + v * 5).toFixed(3)),
-      matched_via,
+      score: Number(score.toFixed(3)),
     });
   }
   candidates.sort((a, b) => b.score - a.score);
@@ -127,7 +97,6 @@ export async function searchDocuments(
 
   return {
     query,
-    vector_search_used: hits !== null,
     total_documents: index.length,
     candidate_count: top.length,
     candidates: top,

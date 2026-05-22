@@ -4,8 +4,9 @@ const nextConfig: NextConfig = {
   // Node/Vercel deployments read the document corpus off disk at runtime
   // (lib/document-utils.ts) — trace ./documents into every route bundle since
   // the .md paths come from index.json and can't be statically detected.
-  // (The Cloudflare/OpenNext build instead embeds the corpus as a module via
-  // scripts/build-corpus.mjs — Workers have no project filesystem.)
+  // (The Cloudflare/OpenNext build instead serves the corpus from static
+  // assets — public/corpus.json, built by scripts/build-corpus.mjs — since
+  // Workers have no project filesystem.)
   outputFileTracingIncludes: {
     "/*": ["./documents/**/*"],
   },

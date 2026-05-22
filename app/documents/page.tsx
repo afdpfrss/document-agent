@@ -147,7 +147,7 @@ export default async function DocumentsPage() {
                         </Link>
                         {canEdit && (
                           <Link
-                            href={`/edit/${d.id}`}
+                            href={`/compose?mode=edit&doc=${d.id}`}
                             className="text-slate-600 hover:text-indigo-700 hover:underline"
                           >
                             編集

@@ -60,7 +60,7 @@ export function DocumentReference({ sources }: { sources: SearchSource[] }) {
                 <span className="font-semibold text-indigo-900">{s.title}</span>
                 <span className="text-slate-400 text-[10px]">{s.doc_id}</span>
                 <a
-                  href={`/edit/${s.doc_id}`}
+                  href={`/compose?mode=edit&doc=${s.doc_id}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[10px] text-slate-500 hover:text-indigo-700 hover:underline ml-auto"

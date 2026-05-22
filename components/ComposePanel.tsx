@@ -6,11 +6,12 @@
 //   - 新規作成 (create): chat with the AI to draft a brand-new document. The
 //     AI returns the full markdown body + suggested metadata; the user reviews
 //     it in a Monaco editor and opens a PR via /api/compose/submit.
-//   - 既存を編集 (edit): pick an existing document, then drop into the proven
-//     chat editor (EditorPanel) — same {find, replace} structured-edit flow as
-//     /edit/[docId], embedded inline so it all lives on one page.
+//   - 既存を編集 (edit): pick an existing document (or arrive via a
+//     ?mode=edit&doc= deep link), then drop into the EditorPanel chat editor
+//     with its {find, replace} structured-edit flow.
 
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -52,9 +53,76 @@ interface Props {
   categories: string[];
 }
 
+// Fetch one document's current content and shape it into an EditTarget. Shared
+// by the picker and the ?doc= deep-link path so both behave identically.
+async function fetchEditTarget(
+  id: string,
+): Promise<{ target: EditTarget } | { error: string }> {
+  try {
+    const res = await fetch(`/api/edit/${id}`);
+    const data = (await res.json()) as {
+      id?: string;
+      title?: string;
+      category?: string;
+      path?: string;
+      content?: string;
+      error?: string;
+    };
+    if (!res.ok || !data.id || data.content === undefined) {
+      return { error: data.error ?? "文書の読み込みに失敗しました。" };
+    }
+    return {
+      target: {
+        docId: data.id,
+        docTitle: data.title ?? data.id,
+        docCategory: data.category ?? "",
+        docPath: data.path ?? "",
+        initialContent: data.content,
+      },
+    };
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : "通信エラーが発生しました。",
+    };
+  }
+}
+
 export function ComposePanel({ docs, categories }: Props) {
-  const [mode, setMode] = useState<Mode>("create");
+  // Deep link: /compose?mode=edit&doc=doc_001 drops straight into the editor
+  // for that document — used by the 編集 links on /docs, /documents and the
+  // chat citation cards.
+  const searchParams = useSearchParams();
+  const deepLinkDocId = searchParams.get("doc");
+  const [mode, setMode] = useState<Mode>(
+    searchParams.get("mode") === "edit" || deepLinkDocId ? "edit" : "create",
+  );
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  // Auto-load state for the ?doc= deep link only.
+  const [autoLoad, setAutoLoad] = useState<
+    { status: "loading" } | { status: "error"; message: string } | null
+  >(deepLinkDocId ? { status: "loading" } : null);
+
+  useEffect(() => {
+    if (!deepLinkDocId) return;
+    let cancelled = false;
+    fetchEditTarget(deepLinkDocId).then((r) => {
+      if (cancelled) return;
+      if ("error" in r) {
+        setAutoLoad({ status: "error", message: r.error });
+      } else {
+        setEditTarget(r.target);
+        setAutoLoad(null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [deepLinkDocId]);
+
+  function pickTarget(t: EditTarget) {
+    setEditTarget(t);
+    setAutoLoad(null);
+  }
 
   return (
     <div className="h-full flex flex-col">
@@ -106,8 +174,18 @@ export function ComposePanel({ docs, categories }: Props) {
                 docPath={editTarget.docPath}
                 initialContent={editTarget.initialContent}
               />
+            ) : autoLoad?.status === "loading" ? (
+              <div className="h-full grid place-items-center text-sm text-slate-500">
+                文書を読み込み中…
+              </div>
             ) : (
-              <EditPicker docs={docs} onPick={setEditTarget} />
+              <EditPicker
+                docs={docs}
+                onPick={pickTarget}
+                initialError={
+                  autoLoad?.status === "error" ? autoLoad.message : null
+                }
+              />
             )}
           </div>
         )}
@@ -121,43 +199,26 @@ export function ComposePanel({ docs, categories }: Props) {
 function EditPicker({
   docs,
   onPick,
+  initialError = null,
 }: {
   docs: DocLite[];
   onPick: (t: EditTarget) => void;
+  initialError?: string | null;
 }) {
   const [query, setQuery] = useState("");
   const [loadingId, setLoadingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
 
   async function pick(id: string) {
     setLoadingId(id);
     setError(null);
-    try {
-      const res = await fetch(`/api/edit/${id}`);
-      const data = (await res.json()) as {
-        id?: string;
-        title?: string;
-        category?: string;
-        path?: string;
-        content?: string;
-        error?: string;
-      };
-      if (!res.ok || !data.id || data.content === undefined) {
-        setError(data.error ?? "文書の読み込みに失敗しました。");
-        return;
-      }
-      onPick({
-        docId: data.id,
-        docTitle: data.title ?? data.id,
-        docCategory: data.category ?? "",
-        docPath: data.path ?? "",
-        initialContent: data.content,
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "通信エラーが発生しました。");
-    } finally {
-      setLoadingId(null);
+    const r = await fetchEditTarget(id);
+    if ("error" in r) {
+      setError(r.error);
+    } else {
+      onPick(r.target);
     }
+    setLoadingId(null);
   }
 
   const q = query.trim().toLowerCase();
