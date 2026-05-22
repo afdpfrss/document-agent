@@ -43,16 +43,23 @@ function getSecret(): string | null {
 
 // --- base / resource URLs -------------------------------------------------
 
+// Public origin derived from a Headers bag: explicit env override first, then
+// forwarded headers (works behind a CDN / reverse-proxy edge), then the Host
+// header. Returns null when no host is present so callers holding a full
+// request URL can fall back to its origin. Lets Server Components reuse the
+// same resolution via next/headers' headers().
+export function baseUrlFromHeaders(h: Headers): string | null {
+  const override = process.env.MCP_PUBLIC_URL || process.env.AUTH_URL;
+  if (override) return override.replace(/\/+$/, "");
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  const host = h.get("x-forwarded-host") ?? h.get("host");
+  return host ? `${proto}://${host}` : null;
+}
+
 // Public origin of this deployment. Prefer an explicit env override; otherwise
 // derive from forwarded headers (works behind a CDN / reverse-proxy edge).
 export function baseUrl(req: Request): string {
-  const override = process.env.MCP_PUBLIC_URL || process.env.AUTH_URL;
-  if (override) return override.replace(/\/+$/, "");
-  const h = req.headers;
-  const proto = h.get("x-forwarded-proto") ?? "https";
-  const host = h.get("x-forwarded-host") ?? h.get("host");
-  if (host) return `${proto}://${host}`;
-  return new URL(req.url).origin;
+  return baseUrlFromHeaders(req.headers) ?? new URL(req.url).origin;
 }
 
 export function mcpResourceUrl(req: Request): string {
