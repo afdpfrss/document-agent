@@ -68,6 +68,30 @@ export interface DraftDocumentResult {
   notes: string;
 }
 
+// Transient Gemini failures (429 / rate limit / quota / 5xx) are retried with
+// exponential backoff — same policy as lib/gemini-search.ts. Non-transient
+// errors (bad request, blocked content, parse failures) are thrown at once.
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (
+        /429|rate|quota|5\d\d|unavailable|deadline/i.test(msg) &&
+        i < attempts - 1
+      ) {
+        await new Promise((r) => setTimeout(r, 500 * 2 ** i));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
+
 export async function draftDocumentViaLlm(
   input: DraftDocumentInput,
 ): Promise<DraftDocumentResult> {
@@ -76,7 +100,10 @@ export async function draftDocumentViaLlm(
     model: llmConfig.answerModel,
     generationConfig: {
       temperature: 0.3,
-      maxOutputTokens: 16384,
+      // Each turn regenerates the whole document as JSON; revisions of a long
+      // draft need ample headroom so the structured output is not truncated
+      // (a truncated response yields invalid JSON downstream).
+      maxOutputTokens: 32768,
       responseMimeType: "application/json",
       responseSchema: DRAFT_SCHEMA,
     },
@@ -111,9 +138,33 @@ ${transcript}
 
 上記を踏まえ、最新の指示を反映した完成版の下書きを JSON で出力してください。`;
 
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
-  const parsed = JSON.parse(text) as Partial<DraftDocumentResult>;
+  const result = await withRetry(() => model.generateContent(prompt));
+
+  // response.text() throws when the candidate was blocked or has no content.
+  let text: string;
+  try {
+    text = result.response.text();
+  } catch {
+    const reason = result.response.promptFeedback?.blockReason;
+    throw new Error(
+      `AI が応答を生成できませんでした${
+        reason ? `（${reason}）` : ""
+      }。表現を変えてもう一度お試しください。`,
+    );
+  }
+  if (!text.trim()) {
+    throw new Error("AI が空の応答を返しました。もう一度お試しください。");
+  }
+
+  // A truncated response (output token cap reached) yields invalid JSON here.
+  let parsed: Partial<DraftDocumentResult>;
+  try {
+    parsed = JSON.parse(text) as Partial<DraftDocumentResult>;
+  } catch {
+    throw new Error(
+      "AI の応答を解釈できませんでした（出力が途中で切れた可能性があります）。指示を短く区切ってもう一度お試しください。",
+    );
+  }
 
   return {
     title: String(parsed.title ?? "").slice(0, 120),
