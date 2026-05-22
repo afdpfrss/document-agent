@@ -10,7 +10,7 @@
 //   buffer → convertToMarkdown → injectSectionMarkers → generateFrontmatterWithLlm
 //          → buildFrontmatter → finalMarkdown
 //
-// Heavy converters (mammoth, pdfjs-dist, xlsx, turndown) are loaded lazily so
+// Heavy converters (mammoth, unpdf, xlsx, turndown) are loaded lazily so
 // we only pay for the formats actually used in a given invocation.
 
 import { llmConfig } from "./llm-config";
@@ -42,13 +42,13 @@ async function convertDocx(buf: Buffer): Promise<string> {
 }
 
 async function convertPdf(buf: Buffer): Promise<string> {
-  // The legacy build runs under plain Node without DOM polyfills.
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const loadingTask = pdfjs.getDocument({
-    data: new Uint8Array(buf),
-    verbosity: 0,
-  });
-  const doc = await loadingTask.promise;
+  // unpdf bundles a serverless build of pdf.js with the browser-only globals
+  // (DOMMatrix, Path2D, …) stubbed out, so it runs under the Cloudflare
+  // Workers runtime — and plain Node — where stock pdfjs-dist throws
+  // "DOMMatrix is not defined". We use its low-level document proxy so the
+  // page/EOL handling below stays identical to the pdfjs-dist version.
+  const { getDocumentProxy } = await import("unpdf");
+  const doc = await getDocumentProxy(new Uint8Array(buf));
   const pages: string[] = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
