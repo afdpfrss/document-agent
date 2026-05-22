@@ -34,10 +34,10 @@ function buildMinimalPdf(text: string): Buffer {
   return Buffer.from(pdf, "latin1");
 }
 
-// Regression: stock pdfjs-dist reaches for the browser-only DOMMatrix global
-// and throws "DOMMatrix is not defined" under the Cloudflare Workers (and
-// plain Node) runtime that serves /api/upload/preview. convertPdf must run on
-// unpdf's serverless pdf.js build, which extracts text without a DOM.
+// Regression: pdf.js reaches for the browser-only DOMMatrix global and throws
+// "DOMMatrix is not defined" under the Cloudflare Workers (and plain Node)
+// runtime that serves /api/upload/preview. convertPdf installs a minimal
+// DOMMatrix polyfill so text extraction works without a DOM.
 describe("convertPdf — text extraction without a DOM", () => {
   it("converts a PDF to markdown instead of throwing", async () => {
     const pdf = buildMinimalPdf("Hello from a PDF");
