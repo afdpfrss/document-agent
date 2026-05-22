@@ -15,7 +15,7 @@
 //   5. Append/replace the entry in documents/index.json.
 //
 // The script is dev tooling — it lives in scripts/ and is not bundled with the
-// Next.js app. Heavy converters (mammoth, xlsx, unpdf, turndown) are
+// Next.js app. Heavy converters (mammoth, xlsx, pdfjs-dist, turndown) are
 // devDependencies and loaded lazily so we only pay for the formats we use.
 //
 // NOTE: lib/ingest-core.ts holds a parallel copy of this conversion logic for
@@ -91,13 +91,49 @@ async function convertDocx(buf) {
   return r.value;
 }
 
+// pdf.js reaches for the browser-only DOMMatrix global, which plain Node (and
+// the Cloudflare Workers runtime) lacks — getDocument otherwise throws
+// "DOMMatrix is not defined". Text extraction only needs the constructor plus
+// translate/scale, so this minimal stand-in is enough.
+function ensureDomMatrix() {
+  if (typeof globalThis.DOMMatrix !== "undefined") return;
+  globalThis.DOMMatrix = class {
+    a = 1;
+    b = 0;
+    c = 0;
+    d = 1;
+    e = 0;
+    f = 0;
+    constructor(init) {
+      if (Array.isArray(init) && init.length === 6) {
+        [this.a, this.b, this.c, this.d, this.e, this.f] = init;
+      }
+    }
+    translateSelf(tx = 0, ty = 0) {
+      this.e = this.a * tx + this.c * ty + this.e;
+      this.f = this.b * tx + this.d * ty + this.f;
+      return this;
+    }
+    scaleSelf(sx = 1, sy = sx) {
+      this.a *= sx;
+      this.b *= sx;
+      this.c *= sy;
+      this.d *= sy;
+      return this;
+    }
+  };
+}
+
 async function convertPdf(buf) {
-  // unpdf bundles a serverless build of pdf.js with the browser-only globals
-  // (DOMMatrix, Path2D, …) stubbed out, so it runs under plain Node and the
-  // Cloudflare Workers runtime alike, where stock pdfjs-dist throws
-  // "DOMMatrix is not defined".
-  const { getDocumentProxy } = await import("unpdf");
-  const doc = await getDocumentProxy(new Uint8Array(buf));
+  ensureDomMatrix();
+  // pdfjs-dist's legacy build runs under plain Node without DOM polyfills.
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(buf),
+    // Silence the verbose font/structure warnings — we only want text.
+    verbosity: 0,
+  });
+  const doc = await loadingTask.promise;
   const pages = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);

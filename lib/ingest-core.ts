@@ -10,7 +10,7 @@
 //   buffer → convertToMarkdown → injectSectionMarkers → generateFrontmatterWithLlm
 //          → buildFrontmatter → finalMarkdown
 //
-// Heavy converters (mammoth, unpdf, xlsx, turndown) are loaded lazily so
+// Heavy converters (mammoth, pdfjs-dist, xlsx, turndown) are loaded lazily so
 // we only pay for the formats actually used in a given invocation.
 
 import { llmConfig } from "./llm-config";
@@ -41,14 +41,50 @@ async function convertDocx(buf: Buffer): Promise<string> {
   return r.value;
 }
 
+// pdf.js reaches for the browser-only DOMMatrix global. Neither the Cloudflare
+// Workers runtime that serves /api/upload/preview nor plain Node defines it,
+// so getDocument otherwise throws "DOMMatrix is not defined". Text extraction
+// only needs the constructor plus translate/scale, so this minimal stand-in is
+// enough — and it keeps the Worker bundle ~700 KB smaller than pulling in
+// unpdf's bundled pdf.js, which matters for the 3 MiB Cloudflare free-plan cap.
+function ensureDomMatrix(): void {
+  const g = globalThis as { DOMMatrix?: unknown };
+  if (typeof g.DOMMatrix !== "undefined") return;
+  g.DOMMatrix = class {
+    a = 1;
+    b = 0;
+    c = 0;
+    d = 1;
+    e = 0;
+    f = 0;
+    constructor(init?: number[]) {
+      if (Array.isArray(init) && init.length === 6) {
+        [this.a, this.b, this.c, this.d, this.e, this.f] = init;
+      }
+    }
+    translateSelf(tx = 0, ty = 0) {
+      this.e = this.a * tx + this.c * ty + this.e;
+      this.f = this.b * tx + this.d * ty + this.f;
+      return this;
+    }
+    scaleSelf(sx = 1, sy = sx) {
+      this.a *= sx;
+      this.b *= sx;
+      this.c *= sy;
+      this.d *= sy;
+      return this;
+    }
+  };
+}
+
 async function convertPdf(buf: Buffer): Promise<string> {
-  // unpdf bundles a serverless build of pdf.js with the browser-only globals
-  // (DOMMatrix, Path2D, …) stubbed out, so it runs under the Cloudflare
-  // Workers runtime — and plain Node — where stock pdfjs-dist throws
-  // "DOMMatrix is not defined". We use its low-level document proxy so the
-  // page/EOL handling below stays identical to the pdfjs-dist version.
-  const { getDocumentProxy } = await import("unpdf");
-  const doc = await getDocumentProxy(new Uint8Array(buf));
+  ensureDomMatrix();
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(buf),
+    verbosity: 0,
+  });
+  const doc = await loadingTask.promise;
   const pages: string[] = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
