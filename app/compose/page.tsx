@@ -1,6 +1,6 @@
 // Server shell for the create/edit chat page (/compose). Auth gate runs here
 // so an unauthorised user gets a clean message instead of a half-rendered
-// editor with API 403s on every action — same pattern as /edit and /upload.
+// editor with API 403s on every action — same pattern as /upload.
 
 import { loadIndex } from "@/lib/document-utils";
 import { categoriesFromIndex } from "@/lib/ingest-core";

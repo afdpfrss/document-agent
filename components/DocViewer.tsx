@@ -74,7 +74,7 @@ export function DocViewer({ doc, sections, canEdit = false }: Props) {
           </h1>
           {canEdit && (
             <Link
-              href={`/edit/${doc.id}`}
+              href={`/compose?mode=edit&doc=${doc.id}`}
               className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-indigo-900 text-white rounded-md hover:bg-indigo-800"
             >
               この文書を編集
