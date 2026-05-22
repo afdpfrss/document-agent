@@ -100,7 +100,10 @@ export async function draftDocumentViaLlm(
     model: llmConfig.answerModel,
     generationConfig: {
       temperature: 0.3,
-      maxOutputTokens: 16384,
+      // Each turn regenerates the whole document as JSON; revisions of a long
+      // draft need ample headroom so the structured output is not truncated
+      // (a truncated response yields invalid JSON downstream).
+      maxOutputTokens: 32768,
       responseMimeType: "application/json",
       responseSchema: DRAFT_SCHEMA,
     },
