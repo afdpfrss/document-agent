@@ -89,7 +89,7 @@ export async function POST(req: Request) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[/api/compose/draft] error:", message);
     return NextResponse.json(
-      { error: "下書きの生成に失敗しました。" },
+      { error: message.slice(0, 300) },
       { status: 502 },
     );
   }
