@@ -15,7 +15,7 @@
 //   5. Append/replace the entry in documents/index.json.
 //
 // The script is dev tooling — it lives in scripts/ and is not bundled with the
-// Next.js app. Heavy converters (mammoth, xlsx, pdfjs-dist, turndown) are
+// Next.js app. Heavy converters (mammoth, xlsx, unpdf, turndown) are
 // devDependencies and loaded lazily so we only pay for the formats we use.
 //
 // NOTE: lib/ingest-core.ts holds a parallel copy of this conversion logic for
@@ -92,14 +92,12 @@ async function convertDocx(buf) {
 }
 
 async function convertPdf(buf) {
-  // pdfjs-dist's legacy build runs under plain Node without DOM polyfills.
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const loadingTask = pdfjs.getDocument({
-    data: new Uint8Array(buf),
-    // Silence the verbose font/structure warnings — we only want text.
-    verbosity: 0,
-  });
-  const doc = await loadingTask.promise;
+  // unpdf bundles a serverless build of pdf.js with the browser-only globals
+  // (DOMMatrix, Path2D, …) stubbed out, so it runs under plain Node and the
+  // Cloudflare Workers runtime alike, where stock pdfjs-dist throws
+  // "DOMMatrix is not defined".
+  const { getDocumentProxy } = await import("unpdf");
+  const doc = await getDocumentProxy(new Uint8Array(buf));
   const pages = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
