@@ -43,8 +43,10 @@ yarn-error.log*
 .dev.vars
 cloudflare-env.d.ts
 
-# Build-time corpus bundle — regenerated from documents/ by
-# scripts/build-corpus.mjs (postinstall / cf:build).
+# Build artifacts — regenerated from documents/ by scripts/build-corpus.mjs
+# (postinstall / cf:build). corpus.json is served from static assets at
+# runtime; lib/generated/ holds the build identifier module.
+/public/corpus.json
 /lib/generated/
 
 # typescript
